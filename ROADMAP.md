@@ -14,7 +14,7 @@
 
 ## 1. Phase 2 Roadmap — Core Research, Compare & Benchmark Upgrades
 Fastest everyday wins with minimal schema churn, establishing unified scoring, research links, and a rich side-by-side comparison experience.
-- [ ] **3DMark Result Links & Benchmark Editing:**
+- [x] **3DMark Result Links & Benchmark Editing:**
   - Add nullable `result_url` column to `public.benchmarks` (per-run links across Time Spy, Fire Strike, Sky Diver, Cloud Gate, and upgrade runs; zero RLS change).
   - Add a `3DMark Result URL` input with automatic suite detection from `3dmark.com/spy/`, `/fs/`, `/sd/`, and `/cg/` URLs in `src/components/BenchmarkModal.tsx`.
   - Add **Edit** support for existing benchmark runs in `src/components/ComputerDetailModal.tsx` so result URLs can be backfilled without re-entering scores, and make 3DMark score badges clickable across Inventory, Detail, and Compare views.
@@ -49,7 +49,7 @@ Foundational parts-tracking architecture and automated hardware import to replac
   - Build a client-side `DOMParser` importer for `HWiNFO32` / `HWiNFO64` XML reports (`Save Report -> XML` or CLI `-r`) covering Win 98 → Win 11 rigs (accessible in the Import tab and directly from `src/components/ComputerDetailModal.tsx`; supports direct owner login on modern rigs or USB/NAS XML file upload from retro rigs, while the 2 Linux machines remain manual).
   - Include fuzzy matching against existing `cpus`/`gpus`/variants (including PCI Subsystem IDs for AIB GPUs), an interactive diff/merge preview modal that preserves manual fields software cannot detect (PSU, build date, notes), and optional swap-to-spare updates when hardware changes are detected (zero RLS changes needed).
 - [ ] **AI Export Payload Enrichment:**
-  - Update `src/lib/aiExport.ts` and `src/components/AiExportModal.tsx` to include spare parts inventory, integrated GPUs (`igpu`), PSU connector flags, and 3DMark result URLs so exported JSON/Markdown gives Gemini complete context for upgrade advice.
+  - Update `src/lib/aiExport.ts` and `src/components/AiExportModal.tsx` to include spare parts inventory, integrated GPUs (`igpu`), and PSU connector flags (3DMark `result_url` links are already included) so exported JSON/Markdown gives Gemini complete context for upgrade advice.
 
 ---
 

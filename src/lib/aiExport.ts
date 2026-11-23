@@ -1,17 +1,13 @@
 import type { ComputerWithRelations } from '../types/database';
+import { getLatestBenchmarksMap, getSafeThreeDMarkUrl } from './benchmarks';
 import { formatDirectX } from './directx';
 
 export function getLatestScoresMap(
   rig: ComputerWithRelations,
 ): Record<string, number> {
-  const sorted = [...rig.benchmarks].sort((a, b) =>
-    b.recorded_at.localeCompare(a.recorded_at),
-  );
   const map: Record<string, number> = {};
-  for (const b of sorted) {
-    if (map[b.suite_name] === undefined) {
-      map[b.suite_name] = b.score;
-    }
+  for (const [suite, bench] of Object.entries(getLatestBenchmarksMap(rig))) {
+    map[suite] = bench.score;
   }
   return map;
 }
@@ -83,6 +79,15 @@ export function buildAiExportJson(rigs: ComputerWithRelations[]): string {
           ? `${r.screen_size_inches}" ${r.screen_resolution ?? ''}`.trim()
           : null,
         benchmarks_3dmark: getLatestScoresMap(r),
+        benchmarks_3dmark_runs: r.benchmarks.map((b) => ({
+          suite_name: b.suite_name,
+          score: b.score,
+          graphics_score: b.graphics_score,
+          cpu_score: b.cpu_score,
+          recorded_at: b.recorded_at,
+          result_url: getSafeThreeDMarkUrl(b.result_url),
+          notes: b.notes,
+        })),
       };
     }),
   };
@@ -123,12 +128,20 @@ export function buildAiExportMarkdown(rigs: ComputerWithRelations[]): string {
       : '—';
     const totalGb = r.storage_drives.reduce((s, d) => s + (d.capacity_gb ?? 0), 0);
     const storageLabel = totalGb ? `${totalGb}GB` : '—';
-    const scores = getLatestScoresMap(r);
+    const latestBenchmarks = getLatestBenchmarksMap(r);
+    const formatCellEntry = (abbr: string, suite: string) => {
+      const bench = latestBenchmarks[suite];
+      if (!bench) return null;
+      const safeUrl = getSafeThreeDMarkUrl(bench.result_url);
+      return safeUrl
+        ? `[${abbr}: ${bench.score}](${safeUrl})`
+        : `${abbr}: ${bench.score}`;
+    };
     const scoreParts = [
-      scores['Time Spy'] !== undefined ? `TS: ${scores['Time Spy']}` : null,
-      scores['Fire Strike'] !== undefined ? `FS: ${scores['Fire Strike']}` : null,
-      scores['Sky Diver'] !== undefined ? `SD: ${scores['Sky Diver']}` : null,
-      scores['Cloud Gate'] !== undefined ? `CG: ${scores['Cloud Gate']}` : null,
+      formatCellEntry('TS', 'Time Spy'),
+      formatCellEntry('FS', 'Fire Strike'),
+      formatCellEntry('SD', 'Sky Diver'),
+      formatCellEntry('CG', 'Cloud Gate'),
     ].filter(Boolean);
     const scoreStr = scoreParts.length ? scoreParts.join(' / ') : '—';
 
@@ -199,7 +212,12 @@ export function buildAiExportMarkdown(rigs: ComputerWithRelations[]): string {
       }
       if (r.benchmarks.length > 0) {
         const bStr = r.benchmarks
-          .map((b) => `${b.suite_name}: ${b.score}`)
+          .map((b) => {
+            const safeUrl = getSafeThreeDMarkUrl(b.result_url);
+            return safeUrl
+              ? `[${b.suite_name}: ${b.score}](${safeUrl})`
+              : `${b.suite_name}: ${b.score}`;
+          })
           .join(', ');
         lines.push(`- **3DMark Scores:** ${bStr}`);
       }

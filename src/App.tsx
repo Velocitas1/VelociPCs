@@ -14,7 +14,13 @@ import { PartsCatalogView } from './components/PartsCatalogView';
 import { SteamCompatibilityView } from './components/SteamCompatibilityView';
 import { useAuth } from './hooks/useAuth';
 import { useInventory } from './hooks/useInventory';
-import type { AppTab, ComputerWithRelations, Cpu, Gpu } from './types/database';
+import type {
+  AppTab,
+  Benchmark,
+  ComputerWithRelations,
+  Cpu,
+  Gpu,
+} from './types/database';
 
 const VALID_TABS: AppTab[] = ['inventory', 'compare', 'parts', 'steam', 'import'];
 
@@ -33,9 +39,15 @@ export function App() {
   const [selectedRigId, setSelectedRigId] = useState<number | null>(null);
   const [rigFormOpen, setRigFormOpen] = useState(false);
   const [editingRig, setEditingRig] = useState<ComputerWithRelations | null>(null);
-  const [benchmarkRig, setBenchmarkRig] = useState<ComputerWithRelations | null>(
-    null,
-  );
+  const [benchmarkModalState, setBenchmarkModalState] = useState<{
+    rig: ComputerWithRelations | null;
+    editingBenchmark: Benchmark | null;
+    focusResultUrl: boolean;
+  }>({
+    rig: null,
+    editingBenchmark: null,
+    focusResultUrl: false,
+  });
 
   const [lookupState, setLookupState] = useState<{
     open: boolean;
@@ -254,7 +266,20 @@ export function App() {
           setRigFormOpen(true);
         }}
         onDelete={(rig) => void handleDeleteRig(rig)}
-        onAddBenchmark={(rig) => setBenchmarkRig(rig)}
+        onAddBenchmark={(rig) =>
+          setBenchmarkModalState({
+            rig,
+            editingBenchmark: null,
+            focusResultUrl: false,
+          })
+        }
+        onEditBenchmark={(rig, benchmark, focusUrl = false) =>
+          setBenchmarkModalState({
+            rig,
+            editingBenchmark: benchmark,
+            focusResultUrl: focusUrl,
+          })
+        }
         onDeleteBenchmark={(id) =>
           void inventory.deleteBenchmark(id).then(() => showToast('Benchmark deleted'))
         }
@@ -307,11 +332,25 @@ export function App() {
       />
 
       <BenchmarkModal
-        rig={benchmarkRig}
-        onClose={() => setBenchmarkRig(null)}
-        onSave={async (payload) => {
-          await inventory.addBenchmark(payload);
-          showToast(`Logged ${payload.suite_name} score`);
+        rig={benchmarkModalState.rig}
+        editingBenchmark={benchmarkModalState.editingBenchmark}
+        focusResultUrl={benchmarkModalState.focusResultUrl}
+        cpus={inventory.cpus}
+        gpus={inventory.gpus}
+        onClose={() =>
+          setBenchmarkModalState({
+            rig: null,
+            editingBenchmark: null,
+            focusResultUrl: false,
+          })
+        }
+        onSave={async (payload, existingId) => {
+          await inventory.saveBenchmark(payload, existingId);
+          showToast(
+            existingId
+              ? `Updated ${payload.suite_name} benchmark`
+              : `Logged ${payload.suite_name} score`,
+          );
         }}
       />
 

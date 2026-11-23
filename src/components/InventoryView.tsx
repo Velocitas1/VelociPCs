@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import {
   Cpu as CpuIcon,
+  ExternalLink,
   HardDrive,
   Laptop,
   Monitor,
@@ -9,8 +10,8 @@ import {
   Wifi,
   Zap,
 } from 'lucide-react';
+import { getLatestBenchmarksMap, getSafeThreeDMarkUrl } from '../lib/benchmarks';
 import { getDirectXTierRank } from '../lib/directx';
-import { getLatestScoresMap } from '../lib/aiExport';
 import type { ComputerWithRelations, DeviceType } from '../types/database';
 import { DirectXBadge } from './DirectXBadge';
 import { SpecLink } from './SpecLink';
@@ -41,14 +42,28 @@ export function InventoryView({
         ) >= 1180,
     ).length;
 
-    let topFireStrike: { name: string; score: number } | null = null;
+    let topFireStrike: {
+      name: string;
+      score: number;
+      resultUrl: string | null;
+    } | null = null;
     for (const c of computers) {
       for (const b of c.benchmarks) {
-        if (
-          b.suite_name.toLowerCase() === 'fire strike' &&
-          (!topFireStrike || b.score > topFireStrike.score)
-        ) {
-          topFireStrike = { name: c.name, score: b.score };
+        if (b.suite_name.toLowerCase() === 'fire strike') {
+          const candidateUrl = getSafeThreeDMarkUrl(b.result_url);
+          if (
+            !topFireStrike ||
+            b.score > topFireStrike.score ||
+            (b.score === topFireStrike.score &&
+              !topFireStrike.resultUrl &&
+              candidateUrl)
+          ) {
+            topFireStrike = {
+              name: c.name,
+              score: b.score,
+              resultUrl: candidateUrl,
+            };
+          }
         }
       }
     }
@@ -123,17 +138,38 @@ export function InventoryView({
             DX11 / DX10 / Integrated GPUs
           </p>
         </div>
-        <div className="rounded-xl border border-slate-800 bg-slate-900/70 p-4">
-          <p className="text-xs font-medium text-slate-400">Top Fire Strike</p>
-          <p className="mt-1 text-2xl font-bold text-emerald-300">
-            {stats.topFireStrike
-              ? stats.topFireStrike.score.toLocaleString()
-              : '—'}
-          </p>
-          <p className="mt-0.5 text-xs text-slate-400">
-            {stats.topFireStrike ? stats.topFireStrike.name : 'No runs logged'}
-          </p>
-        </div>
+        {stats.topFireStrike?.resultUrl ? (
+          <a
+            href={stats.topFireStrike.resultUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            title={`Open ${stats.topFireStrike.name} Fire Strike result on 3DMark`}
+            className="group rounded-xl border border-slate-800 bg-slate-900/70 p-4 transition hover:border-emerald-500/50 hover:bg-slate-900"
+          >
+            <p className="flex items-center justify-between text-xs font-medium text-slate-400">
+              <span>Top Fire Strike</span>
+              <ExternalLink className="h-3.5 w-3.5 text-emerald-400/70 transition group-hover:text-emerald-300" />
+            </p>
+            <p className="mt-1 text-2xl font-bold text-emerald-300 underline decoration-emerald-400/40 underline-offset-4 group-hover:text-emerald-200">
+              {stats.topFireStrike.score.toLocaleString()}
+            </p>
+            <p className="mt-0.5 text-xs text-slate-400">
+              {stats.topFireStrike.name}
+            </p>
+          </a>
+        ) : (
+          <div className="rounded-xl border border-slate-800 bg-slate-900/70 p-4">
+            <p className="text-xs font-medium text-slate-400">Top Fire Strike</p>
+            <p className="mt-1 text-2xl font-bold text-emerald-300">
+              {stats.topFireStrike
+                ? stats.topFireStrike.score.toLocaleString()
+                : '—'}
+            </p>
+            <p className="mt-0.5 text-xs text-slate-400">
+              {stats.topFireStrike ? stats.topFireStrike.name : 'No runs logged'}
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Filters Bar */}
@@ -192,7 +228,7 @@ export function InventoryView({
               (sum, d) => sum + (d.capacity_gb ?? 0),
               0,
             );
-            const latestScores = getLatestScoresMap(rig);
+            const latestBenchmarks = getLatestBenchmarksMap(rig);
             const isLaptop = rig.device_type === 'Laptop';
 
             return (
@@ -342,17 +378,42 @@ export function InventoryView({
                   ) : null}
                 </div>
 
-                {Object.keys(latestScores).length > 0 ? (
+                {Object.keys(latestBenchmarks).length > 0 ? (
                   <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-slate-800/80 pt-2.5">
                     <Trophy className="h-3.5 w-3.5 text-amber-400" />
-                    {Object.entries(latestScores).map(([suite, score]) => (
-                      <span
-                        key={suite}
-                        className="rounded-md border border-slate-700/80 bg-slate-950 px-2 py-0.5 font-mono text-[11px] text-slate-200"
-                      >
-                        {suite}: <strong className="text-amber-300">{score.toLocaleString()}</strong>
-                      </span>
-                    ))}
+                    {Object.entries(latestBenchmarks).map(([suite, bench]) => {
+                      const safeUrl = getSafeThreeDMarkUrl(bench.result_url);
+                      if (safeUrl) {
+                        return (
+                          <a
+                            key={suite}
+                            href={safeUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            title={`Open ${suite} result on 3DMark`}
+                            className="inline-flex items-center gap-1 rounded-md border border-amber-500/35 bg-slate-950 px-2 py-0.5 font-mono text-[11px] text-slate-200 transition hover:border-amber-400 hover:bg-amber-500/10"
+                          >
+                            {suite}:{' '}
+                            <strong className="text-amber-300 underline decoration-amber-400/50 underline-offset-2">
+                              {bench.score.toLocaleString()}
+                            </strong>
+                            <ExternalLink className="h-2.5 w-2.5 text-amber-300/80" />
+                          </a>
+                        );
+                      }
+                      return (
+                        <span
+                          key={suite}
+                          className="rounded-md border border-slate-700/80 bg-slate-950 px-2 py-0.5 font-mono text-[11px] text-slate-200"
+                        >
+                          {suite}:{' '}
+                          <strong className="text-amber-300">
+                            {bench.score.toLocaleString()}
+                          </strong>
+                        </span>
+                      );
+                    })}
                   </div>
                 ) : null}
               </article>

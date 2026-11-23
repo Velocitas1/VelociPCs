@@ -1,8 +1,10 @@
 import {
   Cpu as CpuIcon,
   Edit3,
+  ExternalLink,
   HardDrive,
   Laptop,
+  Link2,
   Monitor,
   Plus,
   Trash2,
@@ -11,7 +13,8 @@ import {
   X,
   Zap,
 } from 'lucide-react';
-import type { ComputerWithRelations } from '../types/database';
+import { getSafeThreeDMarkUrl } from '../lib/benchmarks';
+import type { Benchmark, ComputerWithRelations } from '../types/database';
 import { DirectXBadge } from './DirectXBadge';
 import { SpecLink } from './SpecLink';
 
@@ -22,6 +25,11 @@ interface ComputerDetailModalProps {
   onEdit: (rig: ComputerWithRelations) => void;
   onDelete: (rig: ComputerWithRelations) => void;
   onAddBenchmark: (rig: ComputerWithRelations) => void;
+  onEditBenchmark: (
+    rig: ComputerWithRelations,
+    benchmark: Benchmark,
+    focusUrl?: boolean,
+  ) => void;
   onDeleteBenchmark: (benchmarkId: number) => void;
 }
 
@@ -32,6 +40,7 @@ export function ComputerDetailModal({
   onEdit,
   onDelete,
   onAddBenchmark,
+  onEditBenchmark,
   onDeleteBenchmark,
 }: ComputerDetailModalProps) {
   if (!rig) return null;
@@ -411,6 +420,7 @@ export function ComputerDetailModal({
                     suiteMax > 0
                       ? Math.max(12, Math.round((b.score / suiteMax) * 100))
                       : 100;
+                  const safeUrl = getSafeThreeDMarkUrl(b.result_url);
                   return (
                     <div
                       key={b.id}
@@ -423,6 +433,20 @@ export function ComputerDetailModal({
                         <span className="ml-2 font-mono text-[11px] text-slate-500">
                           {b.recorded_at}
                         </span>
+                        {b.graphics_score !== null || b.cpu_score !== null ? (
+                          <p className="mt-0.5 font-mono text-[11px] text-slate-400">
+                            {[
+                              b.graphics_score !== null
+                                ? `Graphics: ${b.graphics_score.toLocaleString()}`
+                                : null,
+                              b.cpu_score !== null
+                                ? `CPU: ${b.cpu_score.toLocaleString()}`
+                                : null,
+                            ]
+                              .filter(Boolean)
+                              .join(' · ')}
+                          </p>
+                        ) : null}
                         {b.notes ? (
                           <p className="text-[11px] text-slate-400">
                             {b.notes}
@@ -437,18 +461,52 @@ export function ComputerDetailModal({
                             style={{ width: `${pct}%` }}
                           />
                         </div>
-                        <span className="w-20 text-right font-mono text-sm font-bold text-amber-300">
-                          {b.score.toLocaleString()}
-                        </span>
-                        {isOwner ? (
-                          <button
-                            type="button"
-                            onClick={() => onDeleteBenchmark(b.id)}
-                            title="Delete benchmark run"
-                            className="rounded p-1 text-slate-500 hover:bg-rose-500/15 hover:text-rose-300"
+                        {safeUrl ? (
+                          <a
+                            href={safeUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title={`Open ${b.suite_name} result on 3DMark`}
+                            className="inline-flex min-w-20 items-center justify-end gap-1 font-mono text-sm font-bold text-amber-300 underline decoration-amber-400/50 underline-offset-2 transition hover:text-amber-200 hover:decoration-amber-300"
                           >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
+                            {b.score.toLocaleString()}
+                            <ExternalLink className="h-3 w-3 shrink-0" />
+                          </a>
+                        ) : (
+                          <span className="min-w-20 text-right font-mono text-sm font-bold text-amber-300">
+                            {b.score.toLocaleString()}
+                          </span>
+                        )}
+                        {isOwner ? (
+                          <div className="flex items-center gap-1">
+                            {!safeUrl ? (
+                              <button
+                                type="button"
+                                onClick={() => onEditBenchmark(rig, b, true)}
+                                title="Add 3DMark result link"
+                                className="inline-flex items-center gap-1 rounded border border-cyan-500/30 bg-cyan-500/10 px-1.5 py-0.5 text-[11px] font-medium text-cyan-300 transition hover:bg-cyan-500/20 hover:text-cyan-200"
+                              >
+                                <Link2 className="h-3 w-3" />
+                                Add link
+                              </button>
+                            ) : null}
+                            <button
+                              type="button"
+                              onClick={() => onEditBenchmark(rig, b, false)}
+                              title="Edit benchmark run"
+                              className="rounded p-1 text-slate-500 hover:bg-cyan-500/15 hover:text-cyan-300"
+                            >
+                              <Edit3 className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => onDeleteBenchmark(b.id)}
+                              title="Delete benchmark run"
+                              className="rounded p-1 text-slate-500 hover:bg-rose-500/15 hover:text-rose-300"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
                         ) : null}
                       </div>
                     </div>

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { compareBenchmarksNewestFirst } from '../lib/benchmarks';
 import { isSupabaseConfigured, supabase } from '../lib/supabase';
 import type {
   Benchmark,
@@ -99,9 +100,7 @@ export function useInventory() {
         storage_drives: [...(c.storage_drives ?? [])].sort((a, b) =>
           Number(b.is_primary) - Number(a.is_primary),
         ),
-        benchmarks: [...(c.benchmarks ?? [])].sort((a, b) =>
-          b.recorded_at.localeCompare(a.recorded_at),
-        ),
+        benchmarks: [...(c.benchmarks ?? [])].sort(compareBenchmarksNewestFirst),
       }));
 
       setComputers(normalizedComputers);
@@ -272,14 +271,23 @@ export function useInventory() {
     [refresh],
   );
 
-  const addBenchmark = useCallback(
+  const saveBenchmark = useCallback(
     async (
       payload: Omit<Benchmark, 'id' | 'created_at' | 'updated_at'>,
+      existingId?: number,
     ): Promise<void> => {
-      const { error: insErr } = await supabase
-        .from('benchmarks')
-        .insert(payload);
-      if (insErr) throw insErr;
+      if (existingId) {
+        const { error: updErr } = await supabase
+          .from('benchmarks')
+          .update(payload)
+          .eq('id', existingId);
+        if (updErr) throw updErr;
+      } else {
+        const { error: insErr } = await supabase
+          .from('benchmarks')
+          .insert(payload);
+        if (insErr) throw insErr;
+      }
       await refresh();
     },
     [refresh],
@@ -312,7 +320,7 @@ export function useInventory() {
     deleteCpu,
     saveGpu,
     deleteGpu,
-    addBenchmark,
+    saveBenchmark,
     deleteBenchmark,
   };
 }

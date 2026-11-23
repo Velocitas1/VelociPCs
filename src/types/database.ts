@@ -80,6 +80,7 @@ export interface Benchmark {
   gpu_id: number | null;
   recorded_at: string;
   notes: string | null;
+  result_url: string | null;
   created_at: string;
   updated_at: string;
 }

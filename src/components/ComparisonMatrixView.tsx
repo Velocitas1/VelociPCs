@@ -1,10 +1,48 @@
 import { useMemo, useState } from 'react';
-import { ArrowDown, ArrowUp, ArrowUpDown, GitCompare, Search, X } from 'lucide-react';
-import { getLatestScoresMap } from '../lib/aiExport';
+import {
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
+  ExternalLink,
+  GitCompare,
+  Search,
+  X,
+} from 'lucide-react';
+import { getLatestBenchmarksMap, getSafeThreeDMarkUrl } from '../lib/benchmarks';
 import { getDirectXTierRank } from '../lib/directx';
-import type { ComputerWithRelations, DeviceType } from '../types/database';
+import type {
+  Benchmark,
+  ComputerWithRelations,
+  DeviceType,
+} from '../types/database';
 import { DirectXBadge } from './DirectXBadge';
 import { SpecLink } from './SpecLink';
+
+function MatrixScoreCell({
+  benchmark,
+}: {
+  benchmark: Benchmark | undefined;
+}) {
+  if (!benchmark) {
+    return <span className="text-slate-600">—</span>;
+  }
+  const safeUrl = getSafeThreeDMarkUrl(benchmark.result_url);
+  if (!safeUrl) {
+    return <>{benchmark.score.toLocaleString()}</>;
+  }
+  return (
+    <a
+      href={safeUrl}
+      target="_blank"
+      rel="noopener noreferrer"
+      title={`Open ${benchmark.suite_name} result on 3DMark`}
+      className="inline-flex items-center justify-end gap-1 underline decoration-amber-400/50 underline-offset-2 transition hover:text-amber-200 hover:decoration-amber-300"
+    >
+      {benchmark.score.toLocaleString()}
+      <ExternalLink className="h-3 w-3 shrink-0" />
+    </a>
+  );
+}
 
 interface ComparisonMatrixViewProps {
   computers: ComputerWithRelations[];
@@ -65,7 +103,7 @@ export function ComparisonMatrixView({
     });
 
     const getVal = (c: ComputerWithRelations, key: SortKey): string | number => {
-      const scores = getLatestScoresMap(c);
+      const benchmarks = getLatestBenchmarksMap(c);
       const totalStorage = c.storage_drives.reduce(
         (sum, d) => sum + (d.capacity_gb ?? 0),
         0,
@@ -95,13 +133,13 @@ export function ComparisonMatrixView({
         case 'build_date':
           return c.build_date ?? '';
         case 'cloud_gate':
-          return scores['Cloud Gate'] ?? -1;
+          return benchmarks['Cloud Gate']?.score ?? -1;
         case 'sky_diver':
-          return scores['Sky Diver'] ?? -1;
+          return benchmarks['Sky Diver']?.score ?? -1;
         case 'fire_strike':
-          return scores['Fire Strike'] ?? -1;
+          return benchmarks['Fire Strike']?.score ?? -1;
         case 'time_spy':
-          return scores['Time Spy'] ?? -1;
+          return benchmarks['Time Spy']?.score ?? -1;
       }
     };
 
@@ -304,23 +342,56 @@ export function ComparisonMatrixView({
                     3DMark (TS / FS / SD / CG)
                   </td>
                   {pinnedRigs.map((r) => {
-                    const s = getLatestScoresMap(r);
+                    const latest = getLatestBenchmarksMap(r);
+                    const items = (
+                      [
+                        ['TS', latest['Time Spy']],
+                        ['FS', latest['Fire Strike']],
+                        ['SD', latest['Sky Diver']],
+                        ['CG', latest['Cloud Gate']],
+                      ] satisfies [string, Benchmark | undefined][]
+                    ).filter((entry): entry is [string, Benchmark] =>
+                      Boolean(entry[1]),
+                    );
+
                     return (
                       <td key={r.id} className="px-3 py-2 font-mono text-amber-300">
-                        {[
-                          s['Time Spy'] !== undefined ? `TS ${s['Time Spy']}` : null,
-                          s['Fire Strike'] !== undefined
-                            ? `FS ${s['Fire Strike']}`
-                            : null,
-                          s['Sky Diver'] !== undefined
-                            ? `SD ${s['Sky Diver']}`
-                            : null,
-                          s['Cloud Gate'] !== undefined
-                            ? `CG ${s['Cloud Gate']}`
-                            : null,
-                        ]
-                          .filter(Boolean)
-                          .join(' · ') || '—'}
+                        {items.length === 0 ? (
+                          '—'
+                        ) : (
+                          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                            {items.map(([abbr, bench], idx) => {
+                              const safeUrl = getSafeThreeDMarkUrl(
+                                bench.result_url,
+                              );
+                              const label = `${abbr} ${bench.score.toLocaleString()}`;
+                              return (
+                                <span
+                                  key={abbr}
+                                  className="inline-flex items-center gap-1"
+                                >
+                                  {idx > 0 ? (
+                                    <span className="text-slate-600">·</span>
+                                  ) : null}
+                                  {safeUrl ? (
+                                    <a
+                                      href={safeUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      title={`Open ${bench.suite_name} result on 3DMark`}
+                                      className="inline-flex items-center gap-0.5 underline decoration-amber-400/50 underline-offset-2 transition hover:text-amber-200 hover:decoration-amber-300"
+                                    >
+                                      {label}
+                                      <ExternalLink className="h-2.5 w-2.5 shrink-0" />
+                                    </a>
+                                  ) : (
+                                    <span>{label}</span>
+                                  )}
+                                </span>
+                              );
+                            })}
+                          </div>
+                        )}
                       </td>
                     );
                   })}
@@ -354,7 +425,7 @@ export function ComparisonMatrixView({
           </thead>
           <tbody className="divide-y divide-slate-800/70">
             {rows.map((rig) => {
-              const scores = getLatestScoresMap(rig);
+              const benchmarks = getLatestBenchmarksMap(rig);
               const totalStorage = rig.storage_drives.reduce(
                 (sum, d) => sum + (d.capacity_gb ?? 0),
                 0,
@@ -444,24 +515,16 @@ export function ComparisonMatrixView({
                     {totalStorage ? `${totalStorage} GB` : '—'}
                   </td>
                   <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-amber-300">
-                    {scores['Cloud Gate']?.toLocaleString() ?? (
-                      <span className="text-slate-600">—</span>
-                    )}
+                    <MatrixScoreCell benchmark={benchmarks['Cloud Gate']} />
                   </td>
                   <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-amber-300">
-                    {scores['Sky Diver']?.toLocaleString() ?? (
-                      <span className="text-slate-600">—</span>
-                    )}
+                    <MatrixScoreCell benchmark={benchmarks['Sky Diver']} />
                   </td>
                   <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-amber-300">
-                    {scores['Fire Strike']?.toLocaleString() ?? (
-                      <span className="text-slate-600">—</span>
-                    )}
+                    <MatrixScoreCell benchmark={benchmarks['Fire Strike']} />
                   </td>
                   <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-amber-300">
-                    {scores['Time Spy']?.toLocaleString() ?? (
-                      <span className="text-slate-600">—</span>
-                    )}
+                    <MatrixScoreCell benchmark={benchmarks['Time Spy']} />
                   </td>
                 </tr>
               );
