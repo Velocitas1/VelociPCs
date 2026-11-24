@@ -14,6 +14,12 @@ import { PartsCatalogView } from './components/PartsCatalogView';
 import { SteamCompatibilityView } from './components/SteamCompatibilityView';
 import { useAuth } from './hooks/useAuth';
 import { useInventory } from './hooks/useInventory';
+import {
+  hasCompareUrlParams,
+  readCompareUrlState,
+  syncCompareParamsToUrl,
+  type CompareState,
+} from './lib/compare';
 import { computeFleetRankings } from './lib/scoring';
 import type {
   AppTab,
@@ -30,11 +36,24 @@ function readHashTab(): AppTab {
   return VALID_TABS.includes(hash) ? hash : 'inventory';
 }
 
+function readInitialTab(): AppTab {
+  if (hasCompareUrlParams(window.location.search)) {
+    const rawHash = window.location.hash.replace(/^#\/?/, '');
+    if (!rawHash || rawHash === 'compare') {
+      return 'compare';
+    }
+  }
+  return readHashTab();
+}
+
 export function App() {
   const auth = useAuth();
   const inventory = useInventory();
 
-  const [activeTab, setActiveTab] = useState<AppTab>(() => readHashTab());
+  const [activeTab, setActiveTab] = useState<AppTab>(() => readInitialTab());
+  const [compareState, setCompareState] = useState<CompareState>(() =>
+    readCompareUrlState(window.location.search),
+  );
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [aiExportOpen, setAiExportOpen] = useState(false);
   const [selectedRigId, setSelectedRigId] = useState<number | null>(null);
@@ -80,10 +99,44 @@ export function App() {
   };
 
   useEffect(() => {
-    const onHashChange = () => setActiveTab(readHashTab());
-    window.addEventListener('hashchange', onHashChange);
-    return () => window.removeEventListener('hashchange', onHashChange);
+    const onUrlChange = () => {
+      const rawHash = window.location.hash.replace(/^#\/?/, '');
+      if (
+        hasCompareUrlParams(window.location.search) &&
+        (!rawHash || rawHash === 'compare')
+      ) {
+        setActiveTab('compare');
+        setCompareState(readCompareUrlState(window.location.search));
+        return;
+      }
+      setActiveTab(readHashTab());
+    };
+    window.addEventListener('hashchange', onUrlChange);
+    window.addEventListener('popstate', onUrlChange);
+    return () => {
+      window.removeEventListener('hashchange', onUrlChange);
+      window.removeEventListener('popstate', onUrlChange);
+    };
   }, []);
+
+  // Prune stale compare IDs only after inventory has loaded cleanly
+  useEffect(() => {
+    if (inventory.loading || inventory.error) return;
+    if (inventory.computers.length === 0) return;
+
+    const validIds = new Set(inventory.computers.map((c) => c.id));
+    setCompareState((prev) => {
+      const filtered = prev.ids.filter((id) => validIds.has(id));
+      if (filtered.length === prev.ids.length) return prev;
+      return { ...prev, ids: filtered };
+    });
+  }, [inventory.loading, inventory.error, inventory.computers]);
+
+  // Sync compare query parameters when on Compare tab, strip on other tabs
+  useEffect(() => {
+    if (inventory.loading && activeTab === 'compare') return;
+    syncCompareParamsToUrl(activeTab, compareState);
+  }, [activeTab, compareState, inventory.loading]);
 
   const handleSelectTab = (tab: AppTab) => {
     setActiveTab(tab);
@@ -180,7 +233,10 @@ export function App() {
               <ComparisonMatrixView
                 computers={inventory.computers}
                 fleetStandings={fleetStandings}
+                compareState={compareState}
+                onChangeCompareState={setCompareState}
                 onSelectComputer={(rig) => setSelectedRigId(rig.id)}
+                onNotify={showToast}
               />
             ) : null}
 

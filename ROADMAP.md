@@ -21,7 +21,7 @@ Fastest everyday wins with minimal schema churn, establishing unified scoring, r
 - [x] **Unified PassMark Scoring & Dynamic Fleet Rank:**
   - Store stable absolute `passmark_score` (PassMark CPU Mark / G3D Mark, higher = better) and optional `score_updated_at` on `cpus` and `gpus` instead of drifting global ordinal ranks (resolving mismatched Desktop vs. Notebookcheck Laptop rank scales so cross-device comparisons stay accurate and scores do not go stale as new hardware launches).
   - Compute per-inventory **"Fleet Rank"** (`#1 of N`) dynamically in the UI from `passmark_score` (and 3DMark scores), keeping/deprecating the legacy `rank` column while migrating.
-- [ ] **Detailed Draggable & Sortable Compare View:**
+- [x] **Detailed Draggable & Sortable Compare View:**
   - Upgrade `src/components/ComparisonMatrixView.tsx` with full collapsible spec rows (CPU, GPU, Memory & Board, Storage, Power/Wireless, 3DMark), a sticky spec label column, and remove the 4-rig cap.
   - Add drag-and-drop left/right column reordering plus `←` / `→` buttons on column headers for keyboard and touch accessibility.
   - Add compare sort presets: `Manual` (auto-selected when dragging), `CPU` (PassMark CPU Mark), `GPU` (PassMark G3D Mark), `DirectX`, and `3DMark` (by suite), plus optional **"Differences Only"** toggle and row-winner highlights.

@@ -3,16 +3,19 @@ import {
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
+  CheckSquare,
+  ChevronDown,
+  ChevronRight,
   ExternalLink,
-  GitCompare,
   Search,
-  X,
+  Square,
+  Table2,
 } from 'lucide-react';
 import { getLatestBenchmarksMap, getSafeThreeDMarkUrl } from '../lib/benchmarks';
+import type { CompareState } from '../lib/compare';
 import { getDirectXTierRank } from '../lib/directx';
 import {
   formatPassMark,
-  formatRankBadge,
   formatShortRank,
   getCompositeTooltip,
   getRankBadgeClasses,
@@ -23,6 +26,7 @@ import type {
   ComputerWithRelations,
   DeviceType,
 } from '../types/database';
+import { DetailedComparePanel } from './DetailedComparePanel';
 import { DirectXBadge } from './DirectXBadge';
 import { SpecLink } from './SpecLink';
 
@@ -55,7 +59,12 @@ function MatrixScoreCell({
 interface ComparisonMatrixViewProps {
   computers: ComputerWithRelations[];
   fleetStandings: Map<number, RigFleetStanding>;
+  compareState: CompareState;
+  onChangeCompareState: (
+    updater: CompareState | ((prev: CompareState) => CompareState),
+  ) => void;
   onSelectComputer: (rig: ComputerWithRelations) => void;
+  onNotify: (message: string) => void;
 }
 
 type SortKey =
@@ -80,13 +89,16 @@ type SortKey =
 export function ComparisonMatrixView({
   computers,
   fleetStandings,
+  compareState,
+  onChangeCompareState,
   onSelectComputer,
+  onNotify,
 }: ComparisonMatrixViewProps) {
   const [typeFilter, setTypeFilter] = useState<'All' | DeviceType>('All');
   const [search, setSearch] = useState('');
   const [sortKey, setSortKey] = useState<SortKey>('fleet_rank');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
-  const [pinnedIds, setPinnedIds] = useState<number[]>([]);
+  const [fleetMatrixOpen, setFleetMatrixOpen] = useState(true);
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -102,11 +114,12 @@ export function ComparisonMatrixView({
   };
 
   const togglePin = (id: number) => {
-    setPinnedIds((prev) => {
-      if (prev.includes(id)) return prev.filter((x) => x !== id);
-      if (prev.length >= 4) return [...prev.slice(1), id];
-      return [...prev, id];
-    });
+    onChangeCompareState((prev) => ({
+      ...prev,
+      ids: prev.ids.includes(id)
+        ? prev.ids.filter((x) => x !== id)
+        : [...prev.ids, id],
+    }));
   };
 
   const rows = useMemo(() => {
@@ -114,7 +127,7 @@ export function ComparisonMatrixView({
     const filtered = computers.filter((c) => {
       if (typeFilter !== 'All' && c.device_type !== typeFilter) return false;
       if (!q) return true;
-      return `${c.name} ${c.cpu?.name ?? ''} ${c.gpu?.name ?? ''} ${c.brand ?? ''} ${c.model ?? ''}`
+      return `${c.name} ${c.cpu?.name ?? ''} ${c.gpu?.name ?? ''} ${c.igpu?.name ?? ''} ${c.brand ?? ''} ${c.model ?? ''}`
         .toLowerCase()
         .includes(q);
     });
@@ -138,7 +151,10 @@ export function ComparisonMatrixView({
       const effectiveGpu = c.gpu ?? c.igpu;
       switch (key) {
         case 'fleet_rank':
-          return fleetStandings.get(c.id)?.overallRank?.rank ?? Number.MAX_SAFE_INTEGER;
+          return (
+            fleetStandings.get(c.id)?.overallRank?.rank ??
+            Number.MAX_SAFE_INTEGER
+          );
         case 'name':
           return c.name.toLowerCase();
         case 'device_type':
@@ -206,13 +222,34 @@ export function ComparisonMatrixView({
     });
   }, [computers, fleetStandings, typeFilter, search, sortKey, sortDir]);
 
-  const pinnedRigs = useMemo(
-    () =>
-      pinnedIds
-        .map((id) => computers.find((c) => c.id === id))
-        .filter((x): x is ComputerWithRelations => Boolean(x)),
-    [pinnedIds, computers],
+  const selectedIdSet = useMemo(
+    () => new Set(compareState.ids),
+    [compareState.ids],
   );
+
+  const allFilteredSelected =
+    rows.length > 0 && rows.every((r) => selectedIdSet.has(r.id));
+
+  const handleToggleFilteredSelection = () => {
+    if (rows.length === 0) return;
+    const rowIds = rows.map((r) => r.id);
+    const rowIdSet = new Set(rowIds);
+
+    onChangeCompareState((prev) => {
+      if (allFilteredSelected) {
+        return {
+          ...prev,
+          ids: prev.ids.filter((id) => !rowIdSet.has(id)),
+        };
+      }
+      const existing = new Set(prev.ids);
+      const added = rowIds.filter((id) => !existing.has(id));
+      return {
+        ...prev,
+        ids: [...prev.ids, ...added],
+      };
+    });
+  };
 
   const SortHeader = ({
     label,
@@ -254,472 +291,362 @@ export function ComparisonMatrixView({
 
   return (
     <div className="space-y-5">
-      {/* Controls */}
-      <div className="flex flex-col gap-3 rounded-xl border border-slate-800 bg-slate-900/60 p-3.5 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex flex-wrap items-center gap-2">
-          {(['All', 'Desktop', 'Laptop'] as const).map((t) => (
-            <button
-              key={t}
-              type="button"
-              onClick={() => setTypeFilter(t)}
-              className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
-                typeFilter === t
-                  ? 'bg-cyan-500 text-slate-950'
-                  : 'border border-slate-700 bg-slate-950 text-slate-300 hover:border-slate-500'
-              }`}
-            >
-              {t === 'All' ? 'All Devices' : `${t}s`}
-            </button>
-          ))}
-          <span className="ml-1 text-xs text-slate-400">
-            Select up to 4 rows to compare side-by-side
-          </span>
-        </div>
+      {/* Detailed Draggable & Sortable Side-by-Side Comparison */}
+      <DetailedComparePanel
+        computers={computers}
+        filteredComputers={rows}
+        fleetStandings={fleetStandings}
+        compareState={compareState}
+        onChangeCompareState={onChangeCompareState}
+        onSelectComputer={onSelectComputer}
+        onNotify={onNotify}
+      />
 
-        <div className="relative w-full sm:w-64">
-          <Search className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-slate-500" />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Filter matrix..."
-            className="w-full rounded-lg border border-slate-700 bg-slate-950 py-1.5 pr-3 pl-9 text-xs text-white placeholder-slate-500 focus:border-cyan-400 focus:outline-none"
-          />
-        </div>
-      </div>
-
-      {/* Pinned Side-by-Side Panel */}
-      {pinnedRigs.length >= 2 ? (
-        <section className="rounded-xl border border-cyan-500/35 bg-slate-900/90 p-4">
-          <div className="mb-3 flex items-center justify-between">
-            <div className="flex items-center gap-2 text-xs font-semibold text-cyan-300 uppercase">
-              <GitCompare className="h-4 w-4" />
-              Side-by-Side Comparison ({pinnedRigs.length} Rigs)
-            </div>
+      {/* Collapsible Fleet Selector Matrix */}
+      <section className="rounded-xl border border-slate-800 bg-slate-900/60">
+        <div
+          onClick={() => setFleetMatrixOpen((open) => !open)}
+          className="flex cursor-pointer flex-wrap items-center justify-between gap-3 px-4 py-3 select-none"
+        >
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
-              onClick={() => setPinnedIds([])}
-              className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-slate-400 hover:bg-slate-800 hover:text-white"
+              onClick={(e) => {
+                e.stopPropagation();
+                setFleetMatrixOpen((open) => !open);
+              }}
+              aria-expanded={fleetMatrixOpen}
+              className="inline-flex items-center gap-2 text-xs font-semibold tracking-wider text-slate-200 uppercase"
             >
-              <X className="h-3.5 w-3.5" />
-              Clear Selection
+              {fleetMatrixOpen ? (
+                <ChevronDown className="h-4 w-4 text-slate-400" />
+              ) : (
+                <ChevronRight className="h-4 w-4 text-slate-400" />
+              )}
+              <Table2 className="h-4 w-4 text-cyan-400" />
+              Fleet Selector Matrix
+            </button>
+            <span className="rounded-full border border-slate-700 bg-slate-950 px-2 py-0.5 font-mono text-[11px] text-slate-300">
+              {rows.length} of {computers.length} Rigs
+            </span>
+            {compareState.ids.length > 0 ? (
+              <span className="rounded-full border border-cyan-500/40 bg-cyan-500/10 px-2 py-0.5 font-mono text-[11px] font-medium text-cyan-200">
+                {compareState.ids.length} selected
+              </span>
+            ) : null}
+          </div>
+
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="flex flex-wrap items-center gap-2"
+          >
+            <button
+              type="button"
+              onClick={handleToggleFilteredSelection}
+              disabled={rows.length === 0}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1 text-xs font-medium text-slate-200 transition hover:border-cyan-500/50 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {allFilteredSelected ? (
+                <>
+                  <Square className="h-3.5 w-3.5 text-slate-400" />
+                  Deselect Filtered ({rows.length})
+                </>
+              ) : (
+                <>
+                  <CheckSquare className="h-3.5 w-3.5 text-cyan-400" />
+                  Select All Filtered ({rows.length})
+                </>
+              )}
             </button>
           </div>
+        </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead>
-                <tr className="border-b border-slate-800 text-slate-400">
-                  <th className="py-2 pr-4 font-medium">Spec</th>
-                  {pinnedRigs.map((r) => (
-                    <th key={r.id} className="min-w-[180px] px-3 py-2 font-bold text-white">
-                      {r.name}
-                      <span className="ml-1.5 font-normal text-slate-400">
-                        ({r.device_type})
-                      </span>
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800/70">
-                <tr>
-                  <td className="py-2 pr-4 text-slate-400">Fleet Rank</td>
-                  {pinnedRigs.map((r) => {
-                    const standing = fleetStandings.get(r.id);
-                    return (
-                      <td key={r.id} className="px-3 py-2 font-mono">
-                        {standing?.overallRank ? (
-                          <div
-                            title={getCompositeTooltip(standing)}
-                            className="flex flex-wrap items-center gap-1.5"
-                          >
-                            <span
-                              className={`rounded border px-1.5 py-0.5 text-[11px] font-semibold ${getRankBadgeClasses(
-                                standing.overallRank,
-                              )}`}
-                            >
-                              {formatRankBadge(standing.overallRank)}
-                            </span>
-                            <span className="text-slate-200">
-                              · {formatPassMark(standing.compositeScore)}
-                            </span>
-                            {standing.classRank ? (
-                              <span className="text-[11px] text-slate-400">
-                                (#{standing.classRank.rank} {r.device_type})
-                              </span>
-                            ) : null}
-                            {standing.isPartial ? (
-                              <span className="text-[11px] text-amber-300">
-                                Partial
-                              </span>
-                            ) : null}
-                          </div>
-                        ) : (
-                          <span className="text-slate-500">—</span>
-                        )}
-                      </td>
-                    );
-                  })}
-                </tr>
-                <tr>
-                  <td className="py-2 pr-4 text-slate-400">CPU</td>
-                  {pinnedRigs.map((r) => (
-                    <td key={r.id} className="px-3 py-2">
-                      {r.cpu ? (
-                        <SpecLink
-                          label={`${r.cpu.brand} ${r.cpu.name}`}
-                          prefix={r.cpu_count > 1 ? `${r.cpu_count}x` : undefined}
-                          specUrl={r.cpu.spec_url}
-                        />
-                      ) : (
-                        '—'
-                      )}
-                    </td>
-                  ))}
-                </tr>
-                <tr>
-                  <td className="py-2 pr-4 text-slate-400">Cores / Clock</td>
-                  {pinnedRigs.map((r) => (
-                    <td key={r.id} className="px-3 py-2 font-mono text-slate-200">
-                      {r.cpu
-                        ? `${(r.cpu.cores ?? 0) * r.cpu_count}C/${
-                            (r.cpu.threads ?? 0) * r.cpu_count
-                          }T @ ${r.cpu.base_clock_ghz ?? '?'} GHz`
-                        : '—'}
-                    </td>
-                  ))}
-                </tr>
-                <tr>
-                  <td className="py-2 pr-4 text-slate-400">GPU</td>
-                  {pinnedRigs.map((r) => (
-                    <td key={r.id} className="px-3 py-2">
-                      {r.gpu ? (
-                        <SpecLink
-                          label={`${r.gpu.brand} ${r.gpu.name}`}
-                          specUrl={r.gpu.spec_url}
-                        />
-                      ) : (
-                        'Integrated / None'
-                      )}
-                    </td>
-                  ))}
-                </tr>
-                <tr>
-                  <td className="py-2 pr-4 text-slate-400">DirectX Support</td>
-                  {pinnedRigs.map((r) => (
-                    <td key={r.id} className="px-3 py-2">
-                      <DirectXBadge
-                        version={r.gpu?.directx_version}
-                        featureLevel={r.gpu?.directx_feature_level}
-                        compact
-                      />
-                    </td>
-                  ))}
-                </tr>
-                <tr>
-                  <td className="py-2 pr-4 text-slate-400">VRAM / RAM</td>
-                  {pinnedRigs.map((r) => (
-                    <td key={r.id} className="px-3 py-2 font-mono text-slate-200">
-                      {r.gpu?.vram_gb !== null && r.gpu?.vram_gb !== undefined
-                        ? `${r.gpu.vram_gb} GB VRAM`
-                        : '— VRAM'}{' '}
-                      · {r.ram_gb ? `${r.ram_gb} GB RAM` : '— RAM'}
-                    </td>
-                  ))}
-                </tr>
-                <tr>
-                  <td className="py-2 pr-4 text-slate-400">
-                    PassMark (CPU / GPU)
-                  </td>
-                  {pinnedRigs.map((r) => {
-                    const standing = fleetStandings.get(r.id);
-                    const cpuStr =
-                      standing?.effectiveCpuScore !== null &&
-                      standing?.effectiveCpuScore !== undefined
-                        ? `CPU ${formatPassMark(standing.effectiveCpuScore)}${
-                            standing.cpuRank
-                              ? ` (${formatShortRank(standing.cpuRank)})`
-                              : ''
-                          }`
-                        : 'CPU —';
-                    const gpuStr =
-                      standing?.effectiveGpuScore !== null &&
-                      standing?.effectiveGpuScore !== undefined
-                        ? `GPU ${formatPassMark(standing.effectiveGpuScore)}${
-                            standing.gpuSource === 'igpu' ? ' iGPU' : ''
-                          }${
-                            standing.gpuRank
-                              ? ` (${formatShortRank(standing.gpuRank)})`
-                              : ''
-                          }`
-                        : 'GPU —';
-                    return (
-                      <td key={r.id} className="px-3 py-2 font-mono text-cyan-200">
-                        {cpuStr} · {gpuStr}
-                      </td>
-                    );
-                  })}
-                </tr>
-                <tr>
-                  <td className="py-2 pr-4 text-slate-400">
-                    3DMark (TS / FS / SD / CG)
-                  </td>
-                  {pinnedRigs.map((r) => {
-                    const latest = getLatestBenchmarksMap(r);
-                    const items = (
-                      [
-                        ['TS', latest['Time Spy']],
-                        ['FS', latest['Fire Strike']],
-                        ['SD', latest['Sky Diver']],
-                        ['CG', latest['Cloud Gate']],
-                      ] satisfies [string, Benchmark | undefined][]
-                    ).filter((entry): entry is [string, Benchmark] =>
-                      Boolean(entry[1]),
-                    );
-
-                    return (
-                      <td key={r.id} className="px-3 py-2 font-mono text-amber-300">
-                        {items.length === 0 ? (
-                          '—'
-                        ) : (
-                          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                            {items.map(([abbr, bench], idx) => {
-                              const safeUrl = getSafeThreeDMarkUrl(
-                                bench.result_url,
-                              );
-                              const label = `${abbr} ${bench.score.toLocaleString()}`;
-                              return (
-                                <span
-                                  key={abbr}
-                                  className="inline-flex items-center gap-1"
-                                >
-                                  {idx > 0 ? (
-                                    <span className="text-slate-600">·</span>
-                                  ) : null}
-                                  {safeUrl ? (
-                                    <a
-                                      href={safeUrl}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      title={`Open ${bench.suite_name} result on 3DMark`}
-                                      className="inline-flex items-center gap-0.5 underline decoration-amber-400/50 underline-offset-2 transition hover:text-amber-200 hover:decoration-amber-300"
-                                    >
-                                      {label}
-                                      <ExternalLink className="h-2.5 w-2.5 shrink-0" />
-                                    </a>
-                                  ) : (
-                                    <span>{label}</span>
-                                  )}
-                                </span>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </td>
-                    );
-                  })}
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
-      ) : null}
-
-      {/* Matrix Table */}
-      <div className="overflow-x-auto rounded-xl border border-slate-800 bg-slate-900/75">
-        <table className="w-full text-left text-xs">
-          <thead className="border-b border-slate-800 bg-slate-950/80">
-            <tr>
-              <th className="px-3 py-2.5 text-center text-slate-500">Pin</th>
-              <SortHeader label="Fleet" colKey="fleet_rank" />
-              <SortHeader label="Rig" colKey="name" />
-              <SortHeader label="Type" colKey="device_type" />
-              <SortHeader label="CPU" colKey="cpu" />
-              <SortHeader label="C/T" colKey="cores" align="right" />
-              <SortHeader label="CPU Mark" colKey="cpu_passmark" align="right" />
-              <SortHeader label="GPU" colKey="gpu" />
-              <SortHeader label="VRAM" colKey="vram" align="right" />
-              <SortHeader label="GPU Mark" colKey="gpu_passmark" align="right" />
-              <SortHeader label="DirectX" colKey="directx" />
-              <SortHeader label="RAM" colKey="ram" align="right" />
-              <SortHeader label="Storage" colKey="storage" align="right" />
-              <SortHeader label="Cloud Gate" colKey="cloud_gate" align="right" />
-              <SortHeader label="Sky Diver" colKey="sky_diver" align="right" />
-              <SortHeader label="Fire Strike" colKey="fire_strike" align="right" />
-              <SortHeader label="Time Spy" colKey="time_spy" align="right" />
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-800/70">
-            {rows.map((rig) => {
-              const benchmarks = getLatestBenchmarksMap(rig);
-              const standing = fleetStandings.get(rig.id);
-              const totalStorage = rig.storage_drives.reduce(
-                (sum, d) => sum + (d.capacity_gb ?? 0),
-                0,
-              );
-              const pinned = pinnedIds.includes(rig.id);
-
-              return (
-                <tr
-                  key={rig.id}
-                  className={`transition hover:bg-slate-800/50 ${
-                    pinned ? 'bg-cyan-500/5' : ''
-                  }`}
-                >
-                  <td className="px-3 py-2.5 text-center">
-                    <input
-                      type="checkbox"
-                      checked={pinned}
-                      onChange={() => togglePin(rig.id)}
-                      aria-label={`Select ${rig.name} for comparison`}
-                      className="rounded border-slate-600 bg-slate-950 text-cyan-500"
-                    />
-                  </td>
-                  <td className="px-3 py-2.5 font-mono whitespace-nowrap">
-                    {standing?.overallRank ? (
-                      <span
-                        title={getCompositeTooltip(standing)}
-                        className={`inline-flex items-center gap-0.5 rounded border px-1.5 py-0.5 text-[11px] font-semibold ${getRankBadgeClasses(
-                          standing.overallRank,
-                        )}`}
-                      >
-                        {formatShortRank(standing.overallRank)}
-                        {standing.isPartial ? (
-                          <span className="text-amber-300">*</span>
-                        ) : null}
-                      </span>
-                    ) : (
-                      <span className="text-slate-600">—</span>
-                    )}
-                  </td>
-                  <td className="px-3 py-2.5 font-semibold whitespace-nowrap">
-                    <button
-                      type="button"
-                      onClick={() => onSelectComputer(rig)}
-                      className="text-left text-white hover:text-cyan-300"
-                    >
-                      {rig.name}
-                    </button>
-                  </td>
-                  <td className="px-3 py-2.5 whitespace-nowrap">
-                    <span
-                      className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${
-                        rig.device_type === 'Laptop'
-                          ? 'bg-violet-500/15 text-violet-300'
-                          : 'bg-sky-500/15 text-sky-300'
-                      }`}
-                    >
-                      {rig.device_type}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2.5 whitespace-nowrap">
-                    {rig.cpu ? (
-                      <SpecLink
-                        label={`${rig.cpu.brand} ${rig.cpu.name}`}
-                        prefix={rig.cpu_count > 1 ? `${rig.cpu_count}x` : undefined}
-                        specUrl={rig.cpu.spec_url}
-                      />
-                    ) : (
-                      <span className="text-slate-500">—</span>
-                    )}
-                  </td>
-                  <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-slate-300">
-                    {rig.cpu
-                      ? `${(rig.cpu.cores ?? 0) * rig.cpu_count}/${
-                          (rig.cpu.threads ?? 0) * rig.cpu_count
-                        }`
-                      : '—'}
-                  </td>
-                  <td
-                    title={
-                      standing?.cpuMultiplier && standing.cpuMultiplier > 1 && rig.cpu?.passmark_score
-                        ? `${formatPassMark(rig.cpu.passmark_score)} × ${standing.cpuMultiplier} (${rig.cpu_count} sockets)`
-                        : undefined
-                    }
-                    className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-cyan-200"
+        {fleetMatrixOpen ? (
+          <div className="space-y-3 border-t border-slate-800/80 p-3.5">
+            {/* Filter & Search Controls */}
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex flex-wrap items-center gap-2">
+                {(['All', 'Desktop', 'Laptop'] as const).map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => setTypeFilter(t)}
+                    className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
+                      typeFilter === t
+                        ? 'bg-cyan-500 text-slate-950'
+                        : 'border border-slate-700 bg-slate-950 text-slate-300 hover:border-slate-500'
+                    }`}
                   >
-                    {standing?.effectiveCpuScore !== null &&
-                    standing?.effectiveCpuScore !== undefined ? (
-                      <>
-                        {formatPassMark(standing.effectiveCpuScore)}
-                        {standing.cpuMultiplier > 1 ? (
-                          <span className="ml-1 text-[10px] text-slate-400">
-                            ×{standing.cpuMultiplier}
-                          </span>
-                        ) : null}
-                      </>
-                    ) : (
-                      <span className="text-slate-600">—</span>
-                    )}
-                  </td>
-                  <td className="px-3 py-2.5 whitespace-nowrap">
-                    {rig.gpu ? (
-                      <SpecLink
-                        label={`${rig.gpu.brand} ${rig.gpu.name}`}
-                        specUrl={rig.gpu.spec_url}
-                      />
-                    ) : rig.igpu ? (
-                      <SpecLink
-                        label={`${rig.igpu.brand} ${rig.igpu.name}`}
-                        prefix="iGPU"
-                        specUrl={rig.igpu.spec_url}
-                      />
-                    ) : (
-                      <span className="text-slate-500">—</span>
-                    )}
-                  </td>
-                  <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-slate-300">
-                    {(rig.gpu ?? rig.igpu)?.vram_gb !== null &&
-                    (rig.gpu ?? rig.igpu)?.vram_gb !== undefined
-                      ? `${(rig.gpu ?? rig.igpu)?.vram_gb} GB`
-                      : '—'}
-                  </td>
-                  <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-emerald-200">
-                    {standing?.effectiveGpuScore !== null &&
-                    standing?.effectiveGpuScore !== undefined ? (
-                      <>
-                        {formatPassMark(standing.effectiveGpuScore)}
-                        {standing.gpuSource === 'igpu' ? (
-                          <span className="ml-1 text-[10px] text-slate-400">
-                            iGPU
-                          </span>
-                        ) : null}
-                      </>
-                    ) : (
-                      <span className="text-slate-600">—</span>
-                    )}
-                  </td>
-                  <td className="px-3 py-2.5 whitespace-nowrap">
-                    <DirectXBadge
-                      version={rig.gpu?.directx_version}
-                      featureLevel={rig.gpu?.directx_feature_level}
-                      compact
+                    {t === 'All' ? 'All Devices' : `${t}s`}
+                  </button>
+                ))}
+                <span className="ml-1 text-xs text-slate-400">
+                  Check any number of rigs to compare side-by-side
+                </span>
+              </div>
+
+              <div className="relative w-full sm:w-64">
+                <Search className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-slate-500" />
+                <input
+                  type="text"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Filter matrix..."
+                  className="w-full rounded-lg border border-slate-700 bg-slate-950 py-1.5 pr-3 pl-9 text-xs text-white placeholder-slate-500 focus:border-cyan-400 focus:outline-none"
+                />
+              </div>
+            </div>
+
+            {/* Matrix Table */}
+            <div className="overflow-x-auto rounded-xl border border-slate-800 bg-slate-900/75">
+              <table className="w-full text-left text-xs">
+                <thead className="border-b border-slate-800 bg-slate-950/80">
+                  <tr>
+                    <th className="px-3 py-2.5 text-center text-slate-500">
+                      Compare
+                    </th>
+                    <SortHeader label="Fleet" colKey="fleet_rank" />
+                    <SortHeader label="Rig" colKey="name" />
+                    <SortHeader label="Type" colKey="device_type" />
+                    <SortHeader label="CPU" colKey="cpu" />
+                    <SortHeader label="C/T" colKey="cores" align="right" />
+                    <SortHeader
+                      label="CPU Mark"
+                      colKey="cpu_passmark"
+                      align="right"
                     />
-                  </td>
-                  <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-slate-300">
-                    {rig.ram_gb ? `${rig.ram_gb} GB` : '—'}
-                  </td>
-                  <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-slate-300">
-                    {totalStorage ? `${totalStorage} GB` : '—'}
-                  </td>
-                  <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-amber-300">
-                    <MatrixScoreCell benchmark={benchmarks['Cloud Gate']} />
-                  </td>
-                  <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-amber-300">
-                    <MatrixScoreCell benchmark={benchmarks['Sky Diver']} />
-                  </td>
-                  <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-amber-300">
-                    <MatrixScoreCell benchmark={benchmarks['Fire Strike']} />
-                  </td>
-                  <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-amber-300">
-                    <MatrixScoreCell benchmark={benchmarks['Time Spy']} />
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+                    <SortHeader label="GPU" colKey="gpu" />
+                    <SortHeader label="VRAM" colKey="vram" align="right" />
+                    <SortHeader
+                      label="GPU Mark"
+                      colKey="gpu_passmark"
+                      align="right"
+                    />
+                    <SortHeader label="DirectX" colKey="directx" />
+                    <SortHeader label="RAM" colKey="ram" align="right" />
+                    <SortHeader label="Storage" colKey="storage" align="right" />
+                    <SortHeader
+                      label="Cloud Gate"
+                      colKey="cloud_gate"
+                      align="right"
+                    />
+                    <SortHeader
+                      label="Sky Diver"
+                      colKey="sky_diver"
+                      align="right"
+                    />
+                    <SortHeader
+                      label="Fire Strike"
+                      colKey="fire_strike"
+                      align="right"
+                    />
+                    <SortHeader
+                      label="Time Spy"
+                      colKey="time_spy"
+                      align="right"
+                    />
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/70">
+                  {rows.length === 0 ? (
+                    <tr>
+                      <td
+                        colSpan={17}
+                        className="px-4 py-8 text-center text-xs text-slate-400"
+                      >
+                        No machines match the current filter.
+                      </td>
+                    </tr>
+                  ) : (
+                    rows.map((rig) => {
+                      const benchmarks = getLatestBenchmarksMap(rig);
+                      const standing = fleetStandings.get(rig.id);
+                      const effectiveGpu = rig.gpu ?? rig.igpu;
+                      const totalStorage = rig.storage_drives.reduce(
+                        (sum, d) => sum + (d.capacity_gb ?? 0),
+                        0,
+                      );
+                      const pinned = selectedIdSet.has(rig.id);
+
+                      return (
+                        <tr
+                          key={rig.id}
+                          className={`transition hover:bg-slate-800/50 ${
+                            pinned ? 'bg-cyan-500/5' : ''
+                          }`}
+                        >
+                          <td className="px-3 py-2.5 text-center">
+                            <input
+                              type="checkbox"
+                              checked={pinned}
+                              onChange={() => togglePin(rig.id)}
+                              aria-label={`Select ${rig.name} for comparison`}
+                              className="rounded border-slate-600 bg-slate-950 text-cyan-500"
+                            />
+                          </td>
+                          <td className="px-3 py-2.5 font-mono whitespace-nowrap">
+                            {standing?.overallRank ? (
+                              <span
+                                title={getCompositeTooltip(standing)}
+                                className={`inline-flex items-center gap-0.5 rounded border px-1.5 py-0.5 text-[11px] font-semibold ${getRankBadgeClasses(
+                                  standing.overallRank,
+                                )}`}
+                              >
+                                {formatShortRank(standing.overallRank)}
+                                {standing.isPartial ? (
+                                  <span className="text-amber-300">*</span>
+                                ) : null}
+                              </span>
+                            ) : (
+                              <span className="text-slate-600">—</span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2.5 font-semibold whitespace-nowrap">
+                            <button
+                              type="button"
+                              onClick={() => onSelectComputer(rig)}
+                              className="text-left text-white hover:text-cyan-300"
+                            >
+                              {rig.name}
+                            </button>
+                          </td>
+                          <td className="px-3 py-2.5 whitespace-nowrap">
+                            <span
+                              className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${
+                                rig.device_type === 'Laptop'
+                                  ? 'bg-violet-500/15 text-violet-300'
+                                  : 'bg-sky-500/15 text-sky-300'
+                              }`}
+                            >
+                              {rig.device_type}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2.5 whitespace-nowrap">
+                            {rig.cpu ? (
+                              <SpecLink
+                                label={`${rig.cpu.brand} ${rig.cpu.name}`}
+                                prefix={
+                                  rig.cpu_count > 1
+                                    ? `${rig.cpu_count}x`
+                                    : undefined
+                                }
+                                specUrl={rig.cpu.spec_url}
+                              />
+                            ) : (
+                              <span className="text-slate-500">—</span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-slate-300">
+                            {rig.cpu
+                              ? `${(rig.cpu.cores ?? 0) * rig.cpu_count}/${
+                                  (rig.cpu.threads ?? 0) * rig.cpu_count
+                                }`
+                              : '—'}
+                          </td>
+                          <td
+                            title={
+                              standing?.cpuMultiplier &&
+                              standing.cpuMultiplier > 1 &&
+                              rig.cpu?.passmark_score
+                                ? `${formatPassMark(rig.cpu.passmark_score)} × ${standing.cpuMultiplier} (${rig.cpu_count} sockets)`
+                                : undefined
+                            }
+                            className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-cyan-200"
+                          >
+                            {standing?.effectiveCpuScore !== null &&
+                            standing?.effectiveCpuScore !== undefined ? (
+                              <>
+                                {formatPassMark(standing.effectiveCpuScore)}
+                                {standing.cpuMultiplier > 1 ? (
+                                  <span className="ml-1 text-[10px] text-slate-400">
+                                    ×{standing.cpuMultiplier}
+                                  </span>
+                                ) : null}
+                              </>
+                            ) : (
+                              <span className="text-slate-600">—</span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2.5 whitespace-nowrap">
+                            {rig.gpu ? (
+                              <SpecLink
+                                label={`${rig.gpu.brand} ${rig.gpu.name}`}
+                                specUrl={rig.gpu.spec_url}
+                              />
+                            ) : rig.igpu ? (
+                              <SpecLink
+                                label={`${rig.igpu.brand} ${rig.igpu.name}`}
+                                prefix="iGPU"
+                                specUrl={rig.igpu.spec_url}
+                              />
+                            ) : (
+                              <span className="text-slate-500">—</span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-slate-300">
+                            {effectiveGpu?.vram_gb !== null &&
+                            effectiveGpu?.vram_gb !== undefined
+                              ? `${effectiveGpu.vram_gb} GB`
+                              : '—'}
+                          </td>
+                          <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-emerald-200">
+                            {standing?.effectiveGpuScore !== null &&
+                            standing?.effectiveGpuScore !== undefined ? (
+                              <>
+                                {formatPassMark(standing.effectiveGpuScore)}
+                                {standing.gpuSource === 'igpu' ? (
+                                  <span className="ml-1 text-[10px] text-slate-400">
+                                    iGPU
+                                  </span>
+                                ) : null}
+                              </>
+                            ) : (
+                              <span className="text-slate-600">—</span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2.5 whitespace-nowrap">
+                            <DirectXBadge
+                              version={effectiveGpu?.directx_version}
+                              featureLevel={effectiveGpu?.directx_feature_level}
+                              compact
+                            />
+                          </td>
+                          <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-slate-300">
+                            {rig.ram_gb ? `${rig.ram_gb} GB` : '—'}
+                          </td>
+                          <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-slate-300">
+                            {totalStorage ? `${totalStorage} GB` : '—'}
+                          </td>
+                          <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-amber-300">
+                            <MatrixScoreCell
+                              benchmark={benchmarks['Cloud Gate']}
+                            />
+                          </td>
+                          <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-amber-300">
+                            <MatrixScoreCell
+                              benchmark={benchmarks['Sky Diver']}
+                            />
+                          </td>
+                          <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-amber-300">
+                            <MatrixScoreCell
+                              benchmark={benchmarks['Fire Strike']}
+                            />
+                          </td>
+                          <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-amber-300">
+                            <MatrixScoreCell
+                              benchmark={benchmarks['Time Spy']}
+                            />
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : null}
+      </section>
     </div>
   );
 }
