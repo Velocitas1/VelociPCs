@@ -38,7 +38,7 @@ Fastest everyday wins with minimal schema churn, establishing unified scoring, r
 
 ## 2. Phase 3 Roadmap — Full Parts Inventory, Open-Dataset Autofill & HWiNFO Import
 Foundational parts-tracking architecture and automated hardware import to replace manual data entry and clear inventory gaps.
-- [ ] **Full Desktop Parts Inventory (Installed vs. Spare) + Inline "+ Add New":**
+- [x] **Full Desktop Parts Inventory (Installed vs. Spare) + Inline "+ Add New":**
   - Use a two-tier hybrid model: keep canonical silicon specs in `cpus` and `gpus`, and track owned model/variant records with `spare_count` and `spec_url` across **GPU Cards** (AIB models referencing `gpus.id` so e.g. `ASUS GTX 970` and `Gigabyte GTX 970` are distinct), **Motherboards**, **RAM Kits**, **Storage Drives**, **PSUs**, **Cases/Coolers**, and **Wi-Fi Cards** (`total owned = installed + spare_count`).
   - Expand `src/components/PartsCatalogView.tsx` with category tabs and `All | Installed | Spare` filters.
   - Roll out the searchable combobox + inline **"+ Add New"** pattern (`src/components/PartCombobox.tsx`) across all build slots in `src/components/ComputerFormModal.tsx`, offering swap-to-spare (`+1` old / `-1` replacement) when swapping desktop parts and excluding soldered laptop parts from desktop spare pickers by default.

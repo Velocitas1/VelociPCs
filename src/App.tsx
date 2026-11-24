@@ -10,6 +10,7 @@ import { CsvImportView } from './components/CsvImportView';
 import { HardwareLookupModal } from './components/HardwareLookupModal';
 import { Header } from './components/Header';
 import { InventoryView } from './components/InventoryView';
+import { PartFormModal } from './components/PartFormModal';
 import {
   PartLinksModal,
   type PartLinksEditTarget,
@@ -24,10 +25,13 @@ import {
   syncCompareParamsToUrl,
   type CompareState,
 } from './lib/compare';
+import { PART_CATEGORY_META } from './lib/parts';
 import { computeFleetRankings } from './lib/scoring';
 import type {
   AppTab,
   Benchmark,
+  CatalogPart,
+  CatalogPartCategory,
   ComputerWithRelations,
   Cpu,
   Gpu,
@@ -81,6 +85,7 @@ export function App() {
     editingCpu: Cpu | null;
     editingGpu: Gpu | null;
     targetField?: 'cpu_id' | 'gpu_id' | 'igpu_id';
+    forGpuCardModal?: boolean;
   }>({
     open: false,
     partType: 'cpu',
@@ -90,10 +95,36 @@ export function App() {
     editingGpu: null,
   });
 
+  const [partFormState, setPartFormState] = useState<{
+    open: boolean;
+    category: CatalogPartCategory;
+    initialQuery: string;
+    editingPart: CatalogPart | null;
+    defaultSpareCount: number;
+    targetSlot?: string;
+  }>({
+    open: false,
+    category: 'motherboard',
+    initialQuery: '',
+    editingPart: null,
+    defaultSpareCount: 0,
+  });
+
   const [recentlyCreatedPart, setRecentlyCreatedPart] = useState<{
     targetField: 'cpu_id' | 'gpu_id' | 'igpu_id';
     id: number;
   } | null>(null);
+
+  const [recentlyCreatedGpuForCardId, setRecentlyCreatedGpuForCardId] = useState<
+    number | null
+  >(null);
+
+  const [recentlyCreatedCatalogPart, setRecentlyCreatedCatalogPart] = useState<{
+    targetSlot: string;
+    category: CatalogPartCategory;
+    part: CatalogPart;
+  } | null>(null);
+
   const [editingLinksTarget, setEditingLinksTarget] =
     useState<PartLinksEditTarget | null>(null);
 
@@ -181,8 +212,36 @@ export function App() {
     if (!window.confirm(`Delete GPU "${gpu.brand} ${gpu.name}" from catalog?`)) {
       return;
     }
-    await inventory.deleteGpu(gpu.id);
-    showToast(`Deleted ${gpu.name}`);
+    try {
+      await inventory.deleteGpu(gpu.id);
+      showToast(`Deleted ${gpu.name}`);
+    } catch (err) {
+      showToast(
+        err instanceof Error
+          ? err.message
+          : 'Cannot delete GPU chip while GPU cards reference it.',
+      );
+    }
+  };
+
+  const handleDeleteCatalogPart = async (
+    category: CatalogPartCategory,
+    part: CatalogPart,
+    installedCount: number,
+  ) => {
+    const meta = PART_CATEGORY_META[category];
+    const partLabel = `${'brand' in part && part.brand ? `${part.brand} ` : ''}${part.model}`;
+    const warning =
+      installedCount > 0
+        ? ` It is currently linked on ${installedCount} ${
+            installedCount === 1 ? 'rig' : 'rigs'
+          } (the rig link will be cleared).`
+        : '';
+    if (!window.confirm(`Delete ${meta.singular} "${partLabel}"?${warning}`)) {
+      return;
+    }
+    await inventory.deleteCatalogPart(category, part.id);
+    showToast(`Deleted ${partLabel}`);
   };
 
   return (
@@ -256,6 +315,14 @@ export function App() {
               <PartsCatalogView
                 cpus={inventory.cpus}
                 gpus={inventory.gpus}
+                gpuCards={inventory.gpuCards}
+                motherboards={inventory.motherboards}
+                ramKits={inventory.ramKits}
+                storageDriveModels={inventory.storageDriveModels}
+                psus={inventory.psus}
+                cases={inventory.cases}
+                coolers={inventory.coolers}
+                wifiCards={inventory.wifiCards}
                 computers={inventory.computers}
                 isOwner={auth.isOwner}
                 onEditPartLinks={
@@ -293,6 +360,30 @@ export function App() {
                   })
                 }
                 onDeleteGpu={(gpu) => void handleDeleteGpu(gpu)}
+                onAddCatalogPart={(category) =>
+                  setPartFormState({
+                    open: true,
+                    category,
+                    initialQuery: '',
+                    editingPart: null,
+                    defaultSpareCount: 1,
+                  })
+                }
+                onEditCatalogPart={(category, part) =>
+                  setPartFormState({
+                    open: true,
+                    category,
+                    initialQuery: '',
+                    editingPart: part,
+                    defaultSpareCount: 0,
+                  })
+                }
+                onDeleteCatalogPart={(category, part, installedCount) =>
+                  void handleDeleteCatalogPart(category, part, installedCount)
+                }
+                onAdjustSpareCount={async (table, id, delta) => {
+                  await inventory.adjustSpareCount(table, id, delta);
+                }}
               />
             ) : null}
 
@@ -338,7 +429,9 @@ export function App() {
 
       <ComputerDetailModal
         rig={selectedRig}
-        standing={selectedRig ? (fleetStandings.get(selectedRig.id) ?? null) : null}
+        standing={
+          selectedRig ? (fleetStandings.get(selectedRig.id) ?? null) : null
+        }
         isOwner={auth.isOwner}
         onClose={() => setSelectedRigId(null)}
         onEdit={(rig) => {
@@ -362,7 +455,9 @@ export function App() {
           })
         }
         onDeleteBenchmark={(id) =>
-          void inventory.deleteBenchmark(id).then(() => showToast('Benchmark deleted'))
+          void inventory
+            .deleteBenchmark(id)
+            .then(() => showToast('Benchmark deleted'))
         }
         onEditPartLinks={auth.isOwner ? setEditingLinksTarget : undefined}
       />
@@ -373,9 +468,22 @@ export function App() {
         computers={inventory.computers}
         cpus={inventory.cpus}
         gpus={inventory.gpus}
+        gpuCards={inventory.gpuCards}
+        motherboards={inventory.motherboards}
+        ramKits={inventory.ramKits}
+        storageDriveModels={inventory.storageDriveModels}
+        psus={inventory.psus}
+        cases={inventory.cases}
+        coolers={inventory.coolers}
+        wifiCards={inventory.wifiCards}
         onClose={() => setRigFormOpen(false)}
-        onSave={async (payload, drives, id) => {
-          const savedId = await inventory.saveComputer(payload, drives, id);
+        onSave={async (payload, drives, id, spareAdjustments) => {
+          const savedId = await inventory.saveComputer(
+            payload,
+            drives,
+            id,
+            spareAdjustments,
+          );
           showToast(id ? `Updated ${payload.name}` : `Added ${payload.name}`);
           return savedId;
         }}
@@ -388,9 +496,58 @@ export function App() {
             editingCpu: null,
             editingGpu: null,
             targetField,
+            forGpuCardModal: false,
+          })
+        }
+        onOpenCreateCatalogPart={(category, initialQuery, targetSlot) =>
+          setPartFormState({
+            open: true,
+            category,
+            initialQuery,
+            editingPart: null,
+            defaultSpareCount: 0,
+            targetSlot,
           })
         }
         recentlyCreatedPart={recentlyCreatedPart}
+        recentlyCreatedCatalogPart={recentlyCreatedCatalogPart}
+      />
+
+      <PartFormModal
+        open={partFormState.open}
+        category={partFormState.category}
+        initialQuery={partFormState.initialQuery}
+        editingPart={partFormState.editingPart}
+        defaultSpareCount={partFormState.defaultSpareCount}
+        gpus={inventory.gpus}
+        recentlyCreatedGpuId={recentlyCreatedGpuForCardId}
+        onOpenGpuLookup={(mode, initialQuery) =>
+          setLookupState({
+            open: true,
+            partType: 'gpu',
+            mode,
+            initialQuery,
+            editingCpu: null,
+            editingGpu: null,
+            forGpuCardModal: true,
+          })
+        }
+        onClose={() =>
+          setPartFormState((s) => ({ ...s, open: false, targetSlot: undefined }))
+        }
+        onSave={inventory.saveCatalogPart}
+        onSaved={(category, part) => {
+          if (partFormState.targetSlot) {
+            setRecentlyCreatedCatalogPart({
+              targetSlot: partFormState.targetSlot,
+              category,
+              part,
+            });
+          }
+          const label =
+            `${'brand' in part && part.brand ? `${part.brand} ` : ''}${part.model}`.trim();
+          showToast(`Saved ${label}`);
+        }}
       />
 
       <HardwareLookupModal
@@ -404,7 +561,9 @@ export function App() {
         onSaveCpu={inventory.saveCpu}
         onSaveGpu={inventory.saveGpu}
         onSaved={(part) => {
-          if (lookupState.targetField) {
+          if (lookupState.forGpuCardModal) {
+            setRecentlyCreatedGpuForCardId(part.id);
+          } else if (lookupState.targetField) {
             setRecentlyCreatedPart({
               targetField: lookupState.targetField,
               id: part.id,
@@ -451,6 +610,10 @@ export function App() {
         onSaveStorageDriveLinks={async (id, specUrl, specLinks) => {
           await inventory.updateStorageDriveLinks(id, specUrl, specLinks);
           showToast('Updated drive links');
+        }}
+        onSaveCatalogPartLinks={async (table, id, specUrl, specLinks) => {
+          await inventory.updateCatalogPartLinks(table, id, specUrl, specLinks);
+          showToast('Updated part links');
         }}
         onSaveComputerSlotLinks={async (computerId, currentMap, slot, entry) => {
           await inventory.updateComputerPartSlotLinks(

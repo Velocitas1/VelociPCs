@@ -24,6 +24,8 @@ import {
 } from '../lib/scoring';
 import {
   buildAibGpuResearchLinks,
+  buildCaseResearchLinks,
+  buildCoolerResearchLinks,
   buildCpuResearchLinks,
   buildGpuResearchLinks,
   buildLaptopResearchLinks,
@@ -32,6 +34,7 @@ import {
   buildRamResearchLinks,
   buildStorageDriveResearchLinks,
   buildWifiResearchLinks,
+  mergePartSpecEntry,
 } from '../lib/specLinks';
 import type { Benchmark, ComputerWithRelations } from '../types/database';
 import { DirectXBadge } from './DirectXBadge';
@@ -333,7 +336,10 @@ export function ComputerDetailModal({
                       links={buildGpuResearchLinks(rig.gpu, {
                         manufacturer: rig.gpu_aib_manufacturer,
                         model: rig.gpu_aib_model,
-                        savedEntry: rig.part_spec_links?.gpu_aib,
+                        savedEntry: mergePartSpecEntry(
+                          rig.gpu_card,
+                          rig.part_spec_links?.gpu_aib,
+                        ),
                       })}
                       onEditLinks={
                         onEditPartLinks
@@ -354,11 +360,15 @@ export function ComputerDetailModal({
                           ]
                             .filter(Boolean)
                             .join(' ');
+                          const mergedAibEntry = mergePartSpecEntry(
+                            rig.gpu_card,
+                            rig.part_spec_links?.gpu_aib,
+                          );
                           const aibLinks = buildAibGpuResearchLinks(
                             rig.gpu,
                             rig.gpu_aib_manufacturer,
                             rig.gpu_aib_model,
-                            rig.part_spec_links?.gpu_aib,
+                            mergedAibEntry,
                           );
                           return (
                             <SpecLink
@@ -368,16 +378,29 @@ export function ComputerDetailModal({
                               onEditLinks={
                                 onEditPartLinks
                                   ? () =>
-                                      onEditPartLinks({
-                                        kind: 'computer_slot',
-                                        computerId: rig.id,
-                                        rigName: rig.name,
-                                        slot: 'gpu_aib',
-                                        partLabel:
-                                          aibLabel ||
-                                          `${rig.gpu!.brand} ${rig.gpu!.name} Board Partner`,
-                                        currentMap: rig.part_spec_links,
-                                      })
+                                      rig.gpu_card
+                                        ? onEditPartLinks({
+                                            kind: 'catalog_part',
+                                            table: 'gpu_cards',
+                                            id: rig.gpu_card.id,
+                                            presetKind: 'gpu_aib',
+                                            partLabel:
+                                              aibLabel ||
+                                              `${rig.gpu_card.brand} ${rig.gpu_card.model}`,
+                                            subtitle: 'GPU Card Catalog Entry',
+                                            specUrl: rig.gpu_card.spec_url,
+                                            specLinks: rig.gpu_card.spec_links,
+                                          })
+                                        : onEditPartLinks({
+                                            kind: 'computer_slot',
+                                            computerId: rig.id,
+                                            rigName: rig.name,
+                                            slot: 'gpu_aib',
+                                            partLabel:
+                                              aibLabel ||
+                                              `${rig.gpu!.brand} ${rig.gpu!.name} Board Partner`,
+                                            currentMap: rig.part_spec_links,
+                                          })
                                   : undefined
                               }
                             />
@@ -497,7 +520,7 @@ export function ComputerDetailModal({
                 ) : (
                   <Zap className="h-4 w-4 text-amber-400" />
                 )}
-                {isLaptop ? 'Memory, Display & Wireless' : 'Memory, Board & Power'}
+                {isLaptop ? 'Memory, Display & Wireless' : 'Memory, Board, Chassis & Power'}
               </div>
               <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-slate-300">
                 <div>
@@ -512,7 +535,10 @@ export function ComputerDetailModal({
                         .filter(Boolean)
                         .join(' ');
                       const ramLinks = buildRamResearchLinks(
-                        rig.part_spec_links?.ram,
+                        mergePartSpecEntry(
+                          rig.ram_kit,
+                          rig.part_spec_links?.ram,
+                        ),
                       );
                       if (ramLinks.length > 0 || (onEditPartLinks && ramText)) {
                         return (
@@ -523,14 +549,27 @@ export function ComputerDetailModal({
                             onEditLinks={
                               onEditPartLinks
                                 ? () =>
-                                    onEditPartLinks({
-                                      kind: 'computer_slot',
-                                      computerId: rig.id,
-                                      rigName: rig.name,
-                                      slot: 'ram',
-                                      partLabel: ramText || 'RAM Kit',
-                                      currentMap: rig.part_spec_links,
-                                    })
+                                    rig.ram_kit
+                                      ? onEditPartLinks({
+                                          kind: 'catalog_part',
+                                          table: 'ram_kits',
+                                          id: rig.ram_kit.id,
+                                          presetKind: 'ram',
+                                          partLabel:
+                                            ramText ||
+                                            `${rig.ram_kit.brand ?? ''} ${rig.ram_kit.model}`.trim(),
+                                          subtitle: 'RAM Kit Catalog Entry',
+                                          specUrl: rig.ram_kit.spec_url,
+                                          specLinks: rig.ram_kit.spec_links,
+                                        })
+                                      : onEditPartLinks({
+                                          kind: 'computer_slot',
+                                          computerId: rig.id,
+                                          rigName: rig.name,
+                                          slot: 'ram',
+                                          partLabel: ramText || 'RAM Kit',
+                                          currentMap: rig.part_spec_links,
+                                        })
                                 : undefined
                             }
                           />
@@ -556,7 +595,10 @@ export function ComputerDetailModal({
                             rig.motherboard_brand,
                             rig.motherboard_name,
                             rig.motherboard_launch,
-                            rig.part_spec_links?.motherboard,
+                            mergePartSpecEntry(
+                              rig.motherboard,
+                              rig.part_spec_links?.motherboard,
+                            ),
                           );
                           return mbText || mbLinks.length > 0 ? (
                             <SpecLink
@@ -566,14 +608,27 @@ export function ComputerDetailModal({
                               onEditLinks={
                                 onEditPartLinks
                                   ? () =>
-                                      onEditPartLinks({
-                                        kind: 'computer_slot',
-                                        computerId: rig.id,
-                                        rigName: rig.name,
-                                        slot: 'motherboard',
-                                        partLabel: mbText || 'Motherboard',
-                                        currentMap: rig.part_spec_links,
-                                      })
+                                      rig.motherboard
+                                        ? onEditPartLinks({
+                                            kind: 'catalog_part',
+                                            table: 'motherboards',
+                                            id: rig.motherboard.id,
+                                            presetKind: 'motherboard',
+                                            partLabel:
+                                              mbText ||
+                                              `${rig.motherboard.brand} ${rig.motherboard.model}`,
+                                            subtitle: 'Motherboard Catalog Entry',
+                                            specUrl: rig.motherboard.spec_url,
+                                            specLinks: rig.motherboard.spec_links,
+                                          })
+                                        : onEditPartLinks({
+                                            kind: 'computer_slot',
+                                            computerId: rig.id,
+                                            rigName: rig.name,
+                                            slot: 'motherboard',
+                                            partLabel: mbText || 'Motherboard',
+                                            currentMap: rig.part_spec_links,
+                                          })
                                   : undefined
                               }
                             />
@@ -596,7 +651,10 @@ export function ComputerDetailModal({
                           const psuLinks = buildPsuResearchLinks(
                             rig.psu_brand,
                             rig.psu_wattage,
-                            rig.part_spec_links?.psu,
+                            mergePartSpecEntry(
+                              rig.psu,
+                              rig.part_spec_links?.psu,
+                            ),
                           );
                           return psuText || psuLinks.length > 0 ? (
                             <SpecLink
@@ -606,14 +664,27 @@ export function ComputerDetailModal({
                               onEditLinks={
                                 onEditPartLinks
                                   ? () =>
-                                      onEditPartLinks({
-                                        kind: 'computer_slot',
-                                        computerId: rig.id,
-                                        rigName: rig.name,
-                                        slot: 'psu',
-                                        partLabel: psuText || 'Power Supply',
-                                        currentMap: rig.part_spec_links,
-                                      })
+                                      rig.psu
+                                        ? onEditPartLinks({
+                                            kind: 'catalog_part',
+                                            table: 'psus',
+                                            id: rig.psu.id,
+                                            presetKind: 'psu',
+                                            partLabel:
+                                              psuText ||
+                                              `${rig.psu.brand} ${rig.psu.model}`,
+                                            subtitle: 'PSU Catalog Entry',
+                                            specUrl: rig.psu.spec_url,
+                                            specLinks: rig.psu.spec_links,
+                                          })
+                                        : onEditPartLinks({
+                                            kind: 'computer_slot',
+                                            computerId: rig.id,
+                                            rigName: rig.name,
+                                            slot: 'psu',
+                                            partLabel: psuText || 'Power Supply',
+                                            currentMap: rig.part_spec_links,
+                                          })
                                   : undefined
                               }
                             />
@@ -640,6 +711,143 @@ export function ComputerDetailModal({
                             : 'No'}
                       </dd>
                     </div>
+                    <div>
+                      <dt className="text-slate-500">PC Case</dt>
+                      <dd className="mt-0.5">
+                        {rig.pc_case ? (
+                          <SpecLink
+                            compact
+                            label={`${rig.pc_case.brand} ${rig.pc_case.model}`}
+                            links={buildCaseResearchLinks(
+                              rig.pc_case.brand,
+                              rig.pc_case.model,
+                              {
+                                spec_url: rig.pc_case.spec_url,
+                                links: rig.pc_case.spec_links,
+                              },
+                            )}
+                            onEditLinks={
+                              onEditPartLinks
+                                ? () =>
+                                    onEditPartLinks({
+                                      kind: 'catalog_part',
+                                      table: 'cases',
+                                      id: rig.pc_case!.id,
+                                      presetKind: 'case',
+                                      partLabel: `${rig.pc_case!.brand} ${rig.pc_case!.model}`,
+                                      subtitle: 'Case Catalog Entry',
+                                      specUrl: rig.pc_case!.spec_url,
+                                      specLinks: rig.pc_case!.spec_links,
+                                    })
+                                : undefined
+                            }
+                          />
+                        ) : (
+                          '—'
+                        )}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-slate-500">CPU Cooler</dt>
+                      <dd className="mt-0.5">
+                        {rig.cooler ? (
+                          <SpecLink
+                            compact
+                            label={`${rig.cooler.brand} ${rig.cooler.model}`}
+                            links={buildCoolerResearchLinks(
+                              rig.cooler.brand,
+                              rig.cooler.model,
+                              {
+                                spec_url: rig.cooler.spec_url,
+                                links: rig.cooler.spec_links,
+                              },
+                            )}
+                            onEditLinks={
+                              onEditPartLinks
+                                ? () =>
+                                    onEditPartLinks({
+                                      kind: 'catalog_part',
+                                      table: 'coolers',
+                                      id: rig.cooler!.id,
+                                      presetKind: 'cooler',
+                                      partLabel: `${rig.cooler!.brand} ${rig.cooler!.model}`,
+                                      subtitle: 'Cooler Catalog Entry',
+                                      specUrl: rig.cooler!.spec_url,
+                                      specLinks: rig.cooler!.spec_links,
+                                    })
+                                : undefined
+                            }
+                          />
+                        ) : (
+                          '—'
+                        )}
+                      </dd>
+                    </div>
+                    {rig.wifi_card || rig.wifi_model || rig.wifi_product ? (
+                      <div className="col-span-2">
+                        <dt className="text-slate-500">Wi-Fi / Bluetooth</dt>
+                        <dd className="mt-0.5 flex flex-wrap items-center gap-1.5">
+                          {(() => {
+                            const wifiText = [
+                              rig.wifi_brand,
+                              rig.wifi_product,
+                              rig.wifi_model,
+                            ]
+                              .filter(Boolean)
+                              .join(' ');
+                            const wifiLinks = buildWifiResearchLinks(
+                              rig.wifi_brand,
+                              rig.wifi_product,
+                              rig.wifi_model,
+                              mergePartSpecEntry(
+                                rig.wifi_card,
+                                rig.part_spec_links?.wifi,
+                              ),
+                            );
+                            return (
+                              <>
+                                <SpecLink
+                                  compact
+                                  label={wifiText || 'Wi-Fi Adapter'}
+                                  links={wifiLinks}
+                                  onEditLinks={
+                                    onEditPartLinks
+                                      ? () =>
+                                          rig.wifi_card
+                                            ? onEditPartLinks({
+                                                kind: 'catalog_part',
+                                                table: 'wifi_cards',
+                                                id: rig.wifi_card.id,
+                                                presetKind: 'wifi',
+                                                partLabel:
+                                                  wifiText || rig.wifi_card.model,
+                                                subtitle: 'Wi-Fi Card Catalog Entry',
+                                                specUrl: rig.wifi_card.spec_url,
+                                                specLinks: rig.wifi_card.spec_links,
+                                              })
+                                            : onEditPartLinks({
+                                                kind: 'computer_slot',
+                                                computerId: rig.id,
+                                                rigName: rig.name,
+                                                slot: 'wifi',
+                                                partLabel:
+                                                  wifiText || 'Wi-Fi Adapter',
+                                                currentMap: rig.part_spec_links,
+                                              })
+                                      : undefined
+                                  }
+                                />
+                                {rig.bluetooth_version ? (
+                                  <span className="font-mono text-[11px] text-slate-400">
+                                    · BT {rig.bluetooth_version}
+                                  </span>
+                                ) : null}
+                              </>
+                            );
+                          })()}
+                        </dd>
+                      </div>
+                    ) : null}
                   </>
                 ) : (
                   <>
@@ -673,7 +881,10 @@ export function ComputerDetailModal({
                             rig.wifi_brand,
                             rig.wifi_product,
                             rig.wifi_model,
-                            rig.part_spec_links?.wifi,
+                            mergePartSpecEntry(
+                              rig.wifi_card,
+                              rig.part_spec_links?.wifi,
+                            ),
                           );
                           return (
                             <>
@@ -685,15 +896,27 @@ export function ComputerDetailModal({
                                   onEditLinks={
                                     onEditPartLinks
                                       ? () =>
-                                          onEditPartLinks({
-                                            kind: 'computer_slot',
-                                            computerId: rig.id,
-                                            rigName: rig.name,
-                                            slot: 'wifi',
-                                            partLabel:
-                                              wifiText || 'Wi-Fi Adapter',
-                                            currentMap: rig.part_spec_links,
-                                          })
+                                          rig.wifi_card
+                                            ? onEditPartLinks({
+                                                kind: 'catalog_part',
+                                                table: 'wifi_cards',
+                                                id: rig.wifi_card.id,
+                                                presetKind: 'wifi',
+                                                partLabel:
+                                                  wifiText || rig.wifi_card.model,
+                                                subtitle: 'Wi-Fi Card Catalog Entry',
+                                                specUrl: rig.wifi_card.spec_url,
+                                                specLinks: rig.wifi_card.spec_links,
+                                              })
+                                            : onEditPartLinks({
+                                                kind: 'computer_slot',
+                                                computerId: rig.id,
+                                                rigName: rig.name,
+                                                slot: 'wifi',
+                                                partLabel:
+                                                  wifiText || 'Wi-Fi Adapter',
+                                                currentMap: rig.part_spec_links,
+                                              })
                                       : undefined
                                   }
                                 />
@@ -736,7 +959,17 @@ export function ComputerDetailModal({
                             [d.brand, d.model].filter(Boolean).join(' ') ||
                             'Drive'
                           }`}
-                          links={buildStorageDriveResearchLinks(d)}
+                          links={buildStorageDriveResearchLinks({
+                            ...d,
+                            spec_url:
+                              d.spec_url ??
+                              d.storage_drive_model?.spec_url ??
+                              null,
+                            spec_links:
+                              (d.spec_links?.length ?? 0) > 0
+                                ? d.spec_links
+                                : (d.storage_drive_model?.spec_links ?? []),
+                          })}
                           onEditLinks={
                             onEditPartLinks
                               ? () =>

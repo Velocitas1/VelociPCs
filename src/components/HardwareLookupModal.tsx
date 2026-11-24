@@ -101,6 +101,7 @@ export function HardwareLookupModal({
   const [tdpW, setTdpW] = useState('');
   const [processNm, setProcessNm] = useState('');
   const [passmarkScore, setPassmarkScore] = useState('');
+  const [spareCount, setSpareCount] = useState('0');
 
   // CPU fields
   const [codename, setCodename] = useState('');
@@ -143,6 +144,7 @@ export function HardwareLookupModal({
       setTdpW(editingCpu.tdp_w?.toString() ?? '');
       setProcessNm(editingCpu.process_nm?.toString() ?? '');
       setPassmarkScore(editingCpu.passmark_score?.toString() ?? '');
+      setSpareCount(editingCpu.spare_count.toString());
       setCodename(editingCpu.codename ?? '');
       setSocket(editingCpu.socket ?? '');
       setBaseGhz(editingCpu.base_clock_ghz?.toString() ?? '');
@@ -179,6 +181,7 @@ export function HardwareLookupModal({
       setTdpW('');
       setProcessNm('');
       setPassmarkScore('');
+      setSpareCount('0');
       setCodename('');
       setSocket('');
       setBaseGhz('');
@@ -336,6 +339,12 @@ export function HardwareLookupModal({
     try {
       let saved: Cpu | Gpu;
       if (partType === 'cpu') {
+        const parsedSpare = Number.parseInt(spareCount.trim() || '0', 10);
+        if (!Number.isSafeInteger(parsedSpare) || parsedSpare < 0) {
+          setError('Spare count must be 0 or greater.');
+          setSaving(false);
+          return;
+        }
         saved = await onSaveCpu(
           {
             name: name.trim(),
@@ -357,6 +366,7 @@ export function HardwareLookupModal({
             passmark_score: parsedPassmarkScore,
             score_updated_at: scoreUpdatedAt,
             is_mobile: isMobile,
+            spare_count: parsedSpare,
             spec_url: parsedSpecUrl.normalizedUrl,
             spec_links: cleanedSpecLinks,
           },
@@ -396,7 +406,7 @@ export function HardwareLookupModal({
   };
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/85 p-3 backdrop-blur-sm sm:p-6">
+    <div className="fixed inset-0 z-[65] flex items-center justify-center bg-slate-950/85 p-3 backdrop-blur-sm sm:p-6">
       <div className="flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-slate-800 bg-slate-900 shadow-2xl">
         <div className="flex items-center justify-between border-b border-slate-800 px-5 py-4">
           <div className="flex items-center gap-2.5">
@@ -826,6 +836,19 @@ export function HardwareLookupModal({
                     onChange={(e) => setLaunchDate(e.target.value)}
                     placeholder="2023.Q4"
                     className="w-full rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-xs text-white"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs text-slate-400">
+                    Spare Count
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    step={1}
+                    value={spareCount}
+                    onChange={(e) => setSpareCount(e.target.value)}
+                    className="w-full rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1.5 font-mono text-xs text-emerald-300"
                   />
                 </div>
                 <div className="flex items-end pb-1.5">

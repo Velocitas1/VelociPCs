@@ -582,6 +582,32 @@ export function buildPsuResearchLinks(
   return acc.result;
 }
 
+export function mergePartSpecEntry(
+  catalogPart?: { spec_url?: string | null; spec_links?: SpecLinkItem[] } | null,
+  slotEntry?: PartSpecLinkEntry | null,
+): PartSpecLinkEntry | null {
+  const catalogUrl = getSafeHttpUrl(catalogPart?.spec_url);
+  const slotUrl = getSafeHttpUrl(slotEntry?.spec_url);
+  const primary = catalogUrl ?? slotUrl;
+
+  const extra: SpecLinkItem[] = [];
+  const seen = new Set<string>();
+  if (primary) seen.add(primary);
+
+  for (const link of [...(catalogPart?.spec_links ?? []), ...(slotEntry?.links ?? [])]) {
+    const safe = getSafeHttpUrl(link.url);
+    if (!safe || seen.has(safe)) continue;
+    seen.add(safe);
+    extra.push({ label: link.label, url: safe });
+  }
+
+  if (!primary && extra.length === 0) return null;
+  return {
+    ...(primary ? { spec_url: primary } : {}),
+    ...(extra.length > 0 ? { links: extra } : {}),
+  };
+}
+
 export function buildRamResearchLinks(
   savedEntry?: PartSpecLinkEntry | null,
 ): ResolvedResearchLink[] {
@@ -591,10 +617,56 @@ export function buildRamResearchLinks(
   return acc.result;
 }
 
+export function buildCaseResearchLinks(
+  brand: string | null | undefined,
+  model: string | null | undefined,
+  savedEntry?: PartSpecLinkEntry | null,
+): ResolvedResearchLink[] {
+  const fullName = [brand, model].filter(Boolean).join(' ').trim();
+  const hasSaved = Boolean(savedEntry?.spec_url || (savedEntry?.links?.length ?? 0) > 0);
+  if (!fullName && !hasSaved) return [];
+
+  const acc = new LinksAccumulator();
+  if (savedEntry) {
+    acc.pushEntry(savedEntry.spec_url, savedEntry.links, 'Case Specifications');
+  }
+  if (fullName && !acc.hasAnyDirectLink()) {
+    acc.push(
+      buildGoogleSearchUrl(`${fullName} PC case specifications`),
+      `${brand?.trim() || 'Manufacturer'} Product Page`,
+    );
+  }
+  return acc.result;
+}
+
+export function buildCoolerResearchLinks(
+  brand: string | null | undefined,
+  model: string | null | undefined,
+  savedEntry?: PartSpecLinkEntry | null,
+): ResolvedResearchLink[] {
+  const fullName = [brand, model].filter(Boolean).join(' ').trim();
+  const hasSaved = Boolean(savedEntry?.spec_url || (savedEntry?.links?.length ?? 0) > 0);
+  if (!fullName && !hasSaved) return [];
+
+  const acc = new LinksAccumulator();
+  if (savedEntry) {
+    acc.pushEntry(savedEntry.spec_url, savedEntry.links, 'Cooler Specifications');
+  }
+  if (fullName && !acc.hasAnyDirectLink()) {
+    acc.push(
+      buildGoogleSearchUrl(`${fullName} CPU cooler specifications`),
+      `${brand?.trim() || 'Manufacturer'} Product Page`,
+    );
+  }
+  return acc.result;
+}
+
 export type PartLinkPresetKind =
   | 'cpu'
   | 'gpu'
   | 'storage_drive'
+  | 'case'
+  | 'cooler'
   | ComputerPartLinkSlot;
 
 export interface PartLinkPresetConfig {
@@ -719,6 +791,26 @@ export const PART_LINK_PRESETS: Record<PartLinkPresetKind, PartLinkPresetConfig>
       {
         label: 'Search RAM Specs',
         url: buildGoogleSearchUrl(`${q} RAM memory specifications`),
+      },
+    ],
+  },
+  case: {
+    title: 'PC Case Links',
+    labelPresets: ['Manufacturer Page', 'Manual / Clearance', 'Review'],
+    helperLinks: (q) => [
+      {
+        label: 'Search Case Specs',
+        url: buildGoogleSearchUrl(`${q} PC case specifications`),
+      },
+    ],
+  },
+  cooler: {
+    title: 'CPU Cooler Links',
+    labelPresets: ['Manufacturer Page', 'Socket Support / Manual', 'Review'],
+    helperLinks: (q) => [
+      {
+        label: 'Search Cooler Specs',
+        url: buildGoogleSearchUrl(`${q} CPU cooler specifications`),
       },
     ],
   },

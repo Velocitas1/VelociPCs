@@ -53,6 +53,8 @@ import {
 } from '../lib/scoring';
 import {
   buildAibGpuResearchLinks,
+  buildCaseResearchLinks,
+  buildCoolerResearchLinks,
   buildCpuResearchLinks,
   buildGpuResearchLinks,
   buildLaptopResearchLinks,
@@ -61,6 +63,7 @@ import {
   buildRamResearchLinks,
   buildStorageDriveResearchLinks,
   buildWifiResearchLinks,
+  mergePartSpecEntry,
 } from '../lib/specLinks';
 import type {
   Benchmark,
@@ -871,11 +874,15 @@ export function DetailedComparePanel({
               const aib = [rig.gpu_aib_manufacturer, rig.gpu_aib_model]
                 .filter(Boolean)
                 .join(' ');
+              const mergedAibEntry = mergePartSpecEntry(
+                rig.gpu_card,
+                rig.part_spec_links?.gpu_aib,
+              );
               const aibLinks = buildAibGpuResearchLinks(
                 rig.gpu,
                 rig.gpu_aib_manufacturer,
                 rig.gpu_aib_model,
-                rig.part_spec_links?.gpu_aib,
+                mergedAibEntry,
               );
               return (
                 <div className="space-y-1">
@@ -886,7 +893,7 @@ export function DetailedComparePanel({
                       links={buildGpuResearchLinks(rig.gpu, {
                         manufacturer: rig.gpu_aib_manufacturer,
                         model: rig.gpu_aib_model,
-                        savedEntry: rig.part_spec_links?.gpu_aib,
+                        savedEntry: mergedAibEntry,
                       })}
                       onEditLinks={
                         onEditPartLinks
@@ -1169,7 +1176,9 @@ export function DetailedComparePanel({
                   ? `${rig.ram_type ? ' @ ' : ''}${rig.ram_speed_mhz} MHz`
                   : ''
               }`.trim();
-              const ramLinks = buildRamResearchLinks(rig.part_spec_links?.ram);
+              const ramLinks = buildRamResearchLinks(
+                mergePartSpecEntry(rig.ram_kit, rig.part_spec_links?.ram),
+              );
               return (
                 <div className="flex flex-wrap items-center gap-1.5 font-mono text-slate-200">
                   {ramLinks.length > 0 ? (
@@ -1261,7 +1270,10 @@ export function DetailedComparePanel({
                 rig.motherboard_brand,
                 rig.motherboard_name,
                 rig.motherboard_launch,
-                rig.part_spec_links?.motherboard,
+                mergePartSpecEntry(
+                  rig.motherboard,
+                  rig.part_spec_links?.motherboard,
+                ),
               );
               if (!name && !rig.motherboard_launch && mbLinks.length === 0) {
                 return <span className="text-slate-600">—</span>;
@@ -1298,6 +1310,82 @@ export function DetailedComparePanel({
                 </div>
               );
             },
+          },
+          {
+            key: 'pc_case',
+            label: 'Case',
+            getCanonical: (rig) =>
+              rig.pc_case ? `${rig.pc_case.brand} ${rig.pc_case.model}` : '',
+            render: (rig) =>
+              rig.pc_case ? (
+                <SpecLink
+                  compact
+                  label={`${rig.pc_case.brand} ${rig.pc_case.model}`}
+                  links={buildCaseResearchLinks(
+                    rig.pc_case.brand,
+                    rig.pc_case.model,
+                    {
+                      spec_url: rig.pc_case.spec_url,
+                      links: rig.pc_case.spec_links,
+                    },
+                  )}
+                  onEditLinks={
+                    onEditPartLinks
+                      ? () =>
+                          onEditPartLinks({
+                            kind: 'catalog_part',
+                            table: 'cases',
+                            id: rig.pc_case!.id,
+                            presetKind: 'case',
+                            partLabel: `${rig.pc_case!.brand} ${rig.pc_case!.model}`,
+                            subtitle: 'Case Catalog Entry',
+                            specUrl: rig.pc_case!.spec_url,
+                            specLinks: rig.pc_case!.spec_links,
+                          })
+                      : undefined
+                  }
+                />
+              ) : (
+                <span className="text-slate-600">—</span>
+              ),
+          },
+          {
+            key: 'cpu_cooler',
+            label: 'CPU Cooler',
+            getCanonical: (rig) =>
+              rig.cooler ? `${rig.cooler.brand} ${rig.cooler.model}` : '',
+            render: (rig) =>
+              rig.cooler ? (
+                <SpecLink
+                  compact
+                  label={`${rig.cooler.brand} ${rig.cooler.model}`}
+                  links={buildCoolerResearchLinks(
+                    rig.cooler.brand,
+                    rig.cooler.model,
+                    {
+                      spec_url: rig.cooler.spec_url,
+                      links: rig.cooler.spec_links,
+                    },
+                  )}
+                  onEditLinks={
+                    onEditPartLinks
+                      ? () =>
+                          onEditPartLinks({
+                            kind: 'catalog_part',
+                            table: 'coolers',
+                            id: rig.cooler!.id,
+                            presetKind: 'cooler',
+                            partLabel: `${rig.cooler!.brand} ${rig.cooler!.model}`,
+                            subtitle: 'Cooler Catalog Entry',
+                            specUrl: rig.cooler!.spec_url,
+                            specLinks: rig.cooler!.spec_links,
+                          })
+                      : undefined
+                  }
+                />
+              ) : (
+                <span className="text-slate-600">—</span>
+              ),
           },
         ],
       },
@@ -1408,7 +1496,17 @@ export function DetailedComparePanel({
                           <SpecLink
                             compact
                             label={`${d.capacity_gb ? `${d.capacity_gb} GB ` : ''}${label}`}
-                            links={buildStorageDriveResearchLinks(d)}
+                            links={buildStorageDriveResearchLinks({
+                              ...d,
+                              spec_url:
+                                d.spec_url ??
+                                d.storage_drive_model?.spec_url ??
+                                null,
+                              spec_links:
+                                (d.spec_links?.length ?? 0) > 0
+                                  ? d.spec_links
+                                  : (d.storage_drive_model?.spec_links ?? []),
+                            })}
                             onEditLinks={
                               onEditPartLinks
                                 ? () =>
@@ -1471,7 +1569,7 @@ export function DetailedComparePanel({
                   links={buildPsuResearchLinks(
                     rig.psu_brand,
                     rig.psu_wattage,
-                    rig.part_spec_links?.psu,
+                    mergePartSpecEntry(rig.psu, rig.part_spec_links?.psu),
                   )}
                   onEditLinks={
                     onEditPartLinks
@@ -1592,7 +1690,7 @@ export function DetailedComparePanel({
                 rig.wifi_brand,
                 rig.wifi_product,
                 rig.wifi_model,
-                rig.part_spec_links?.wifi,
+                mergePartSpecEntry(rig.wifi_card, rig.part_spec_links?.wifi),
               );
               return (
                 <div className="space-y-0.5">

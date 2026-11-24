@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import {
+  ArrowRightLeft,
   ChevronDown,
   ChevronRight,
   Link2,
@@ -7,6 +8,27 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
+import {
+  computeDesktopSwapAdjustments,
+  formatCaseLabel,
+  formatCaseSubtitle,
+  formatCoolerLabel,
+  formatCoolerSubtitle,
+  formatGpuCardLabel,
+  formatGpuCardSubtitle,
+  formatMotherboardLabel,
+  formatMotherboardSubtitle,
+  formatPsuLabel,
+  formatPsuSubtitle,
+  formatRamKitLabel,
+  formatRamKitSubtitle,
+  formatStorageDriveModelLabel,
+  formatStorageDriveModelSubtitle,
+  formatWifiCardLabel,
+  formatWifiCardSubtitle,
+  snapshotFromRig,
+  type SpareAdjustment,
+} from '../lib/parts';
 import {
   computeFleetRankings,
   formatPassMark,
@@ -16,16 +38,26 @@ import {
 import { COMPUTER_SLOT_META, parseHttpUrl } from '../lib/specLinks';
 import type {
   BuildStatus,
+  CatalogPart,
+  CatalogPartCategory,
   ComputerPartLinkSlot,
   ComputerWithRelations,
+  Cooler,
   Cpu,
   DeviceType,
   Gpu,
+  GpuCard,
+  Motherboard,
   PartSpecLinksMap,
+  PcCase,
+  Psu,
+  RamKit,
   SpecLinkItem,
+  StorageDriveModel,
+  WifiCard,
 } from '../types/database';
 import type { ComputerUpsertPayload, DriveDraft } from '../hooks/useInventory';
-import { PartCombobox } from './PartCombobox';
+import { CatalogPartCombobox, PartCombobox } from './PartCombobox';
 
 type SlotDraftMap = Record<
   ComputerPartLinkSlot,
@@ -58,11 +90,20 @@ interface ComputerFormModalProps {
   computers: ComputerWithRelations[];
   cpus: Cpu[];
   gpus: Gpu[];
+  gpuCards: GpuCard[];
+  motherboards: Motherboard[];
+  ramKits: RamKit[];
+  storageDriveModels: StorageDriveModel[];
+  psus: Psu[];
+  cases: PcCase[];
+  coolers: Cooler[];
+  wifiCards: WifiCard[];
   onClose: () => void;
   onSave: (
     payload: ComputerUpsertPayload,
     drives: DriveDraft[],
     existingId?: number,
+    spareAdjustments?: SpareAdjustment[],
   ) => Promise<number>;
   onOpenPartLookup: (
     partType: 'cpu' | 'gpu',
@@ -70,9 +111,19 @@ interface ComputerFormModalProps {
     initialQuery: string,
     targetField: 'cpu_id' | 'gpu_id' | 'igpu_id',
   ) => void;
+  onOpenCreateCatalogPart: (
+    category: CatalogPartCategory,
+    initialQuery: string,
+    targetSlot: string,
+  ) => void;
   recentlyCreatedPart?: {
     targetField: 'cpu_id' | 'gpu_id' | 'igpu_id';
     id: number;
+  } | null;
+  recentlyCreatedCatalogPart?: {
+    targetSlot: string;
+    category: CatalogPartCategory;
+    part: CatalogPart;
   } | null;
 }
 
@@ -94,10 +145,20 @@ export function ComputerFormModal({
   computers,
   cpus,
   gpus,
+  gpuCards,
+  motherboards,
+  ramKits,
+  storageDriveModels,
+  psus,
+  cases,
+  coolers,
+  wifiCards,
   onClose,
   onSave,
   onOpenPartLookup,
+  onOpenCreateCatalogPart,
   recentlyCreatedPart,
+  recentlyCreatedCatalogPart,
 }: ComputerFormModalProps) {
   const [name, setName] = useState('');
   const [deviceType, setDeviceType] = useState<DeviceType>('Desktop');
@@ -109,35 +170,44 @@ export function ComputerFormModal({
 
   const [cpuId, setCpuId] = useState<number | null>(null);
   const [cpuCount, setCpuCount] = useState('1');
+  const [gpuCardId, setGpuCardId] = useState<number | null>(null);
   const [gpuId, setGpuId] = useState<number | null>(null);
   const [gpuAibMfg, setGpuAibMfg] = useState('');
   const [gpuAibModel, setGpuAibModel] = useState('');
   const [igpuId, setIgpuId] = useState<number | null>(null);
 
+  const [motherboardId, setMotherboardId] = useState<number | null>(null);
   const [mbName, setMbName] = useState('');
   const [mbBrand, setMbBrand] = useState('');
   const [mbLaunch, setMbLaunch] = useState('');
 
+  const [ramKitId, setRamKitId] = useState<number | null>(null);
   const [ramGb, setRamGb] = useState('');
   const [ramSpeed, setRamSpeed] = useState('');
   const [ramType, setRamType] = useState('');
   const [ramPc, setRamPc] = useState('');
 
+  const [psuId, setPsuId] = useState<number | null>(null);
   const [psuWattage, setPsuWattage] = useState('');
   const [psuBrand, setPsuBrand] = useState('');
   const [psu8Pin, setPsu8Pin] = useState<'unknown' | 'yes' | 'no'>('unknown');
   const [psu6Pin, setPsu6Pin] = useState<'unknown' | 'yes' | 'no'>('unknown');
   const [powerAdapterNotes, setPowerAdapterNotes] = useState('');
 
+  const [caseId, setCaseId] = useState<number | null>(null);
+  const [coolerId, setCoolerId] = useState<number | null>(null);
+
   const [screenSize, setScreenSize] = useState('');
   const [screenRes, setScreenRes] = useState('');
   const [weightLbs, setWeightLbs] = useState('');
 
+  const [wifiCardId, setWifiCardId] = useState<number | null>(null);
   const [wifiBrand, setWifiBrand] = useState('');
   const [wifiProduct, setWifiProduct] = useState('');
   const [wifiModel, setWifiModel] = useState('');
   const [wifiStandard, setWifiStandard] = useState('');
   const [bluetooth, setBluetooth] = useState('');
+  const [wifiFormFactor, setWifiFormFactor] = useState('');
 
   const [drives, setDrives] = useState<DriveDraft[]>([]);
   const [expandedDriveLinks, setExpandedDriveLinks] = useState<
@@ -147,6 +217,9 @@ export function ComputerFormModal({
     createEmptySlotDrafts(),
   );
   const [linksSectionOpen, setLinksSectionOpen] = useState(false);
+  const [uncheckedSwapKeys, setUncheckedSwapKeys] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -155,6 +228,7 @@ export function ComputerFormModal({
     setError(null);
     setLinksSectionOpen(false);
     setExpandedDriveLinks({});
+    setUncheckedSwapKeys(new Set());
     if (editingRig) {
       setName(editingRig.name);
       setDeviceType(editingRig.device_type);
@@ -165,17 +239,21 @@ export function ComputerFormModal({
       setNotes(editingRig.notes ?? '');
       setCpuId(editingRig.cpu_id);
       setCpuCount(editingRig.cpu_count.toString());
+      setGpuCardId(editingRig.gpu_card_id);
       setGpuId(editingRig.gpu_id);
       setGpuAibMfg(editingRig.gpu_aib_manufacturer ?? '');
       setGpuAibModel(editingRig.gpu_aib_model ?? '');
       setIgpuId(editingRig.igpu_id);
+      setMotherboardId(editingRig.motherboard_id);
       setMbName(editingRig.motherboard_name ?? '');
       setMbBrand(editingRig.motherboard_brand ?? '');
       setMbLaunch(editingRig.motherboard_launch ?? '');
+      setRamKitId(editingRig.ram_kit_id);
       setRamGb(editingRig.ram_gb?.toString() ?? '');
       setRamSpeed(editingRig.ram_speed_mhz?.toString() ?? '');
       setRamType(editingRig.ram_type ?? '');
       setRamPc(editingRig.ram_pc_rating ?? '');
+      setPsuId(editingRig.psu_id);
       setPsuWattage(editingRig.psu_wattage?.toString() ?? '');
       setPsuBrand(editingRig.psu_brand ?? '');
       setPsu8Pin(
@@ -193,18 +271,23 @@ export function ComputerFormModal({
             : 'no',
       );
       setPowerAdapterNotes(editingRig.power_adapter_notes ?? '');
+      setCaseId(editingRig.case_id);
+      setCoolerId(editingRig.cooler_id);
       setScreenSize(editingRig.screen_size_inches?.toString() ?? '');
       setScreenRes(editingRig.screen_resolution ?? '');
       setWeightLbs(editingRig.weight_lbs?.toString() ?? '');
+      setWifiCardId(editingRig.wifi_card_id);
       setWifiBrand(editingRig.wifi_brand ?? '');
       setWifiProduct(editingRig.wifi_product ?? '');
       setWifiModel(editingRig.wifi_model ?? '');
       setWifiStandard(editingRig.wifi_standard ?? '');
       setBluetooth(editingRig.bluetooth_version ?? '');
+      setWifiFormFactor(editingRig.wifi_form_factor ?? '');
       setPartSpecLinks(createEmptySlotDrafts(editingRig.part_spec_links));
       setDrives(
         editingRig.storage_drives.map((d) => ({
           id: d.id,
+          storage_drive_model_id: d.storage_drive_model_id ?? null,
           capacity_gb: d.capacity_gb,
           form_factor: d.form_factor,
           brand: d.brand,
@@ -228,33 +311,42 @@ export function ComputerFormModal({
       setNotes('');
       setCpuId(null);
       setCpuCount('1');
+      setGpuCardId(null);
       setGpuId(null);
       setGpuAibMfg('');
       setGpuAibModel('');
       setIgpuId(null);
+      setMotherboardId(null);
       setMbName('');
       setMbBrand('');
       setMbLaunch('');
+      setRamKitId(null);
       setRamGb('');
       setRamSpeed('');
       setRamType('');
       setRamPc('');
+      setPsuId(null);
       setPsuWattage('');
       setPsuBrand('');
       setPsu8Pin('unknown');
       setPsu6Pin('unknown');
       setPowerAdapterNotes('');
+      setCaseId(null);
+      setCoolerId(null);
       setScreenSize('');
       setScreenRes('');
       setWeightLbs('');
+      setWifiCardId(null);
       setWifiBrand('');
       setWifiProduct('');
       setWifiModel('');
       setWifiStandard('');
       setBluetooth('');
+      setWifiFormFactor('');
       setPartSpecLinks(createEmptySlotDrafts());
       setDrives([
         {
+          storage_drive_model_id: null,
           capacity_gb: null,
           form_factor: 'NVMe',
           brand: '',
@@ -282,6 +374,197 @@ export function ComputerFormModal({
     }
   }, [recentlyCreatedPart]);
 
+  const applyGpuCardSelection = (card: GpuCard) => {
+    setGpuCardId(card.id);
+    setGpuId(card.gpu_id);
+    setGpuAibMfg(card.brand);
+    setGpuAibModel(card.model);
+  };
+
+  const applyMotherboardSelection = (mb: Motherboard) => {
+    setMotherboardId(mb.id);
+    setMbBrand(mb.brand);
+    setMbName(mb.model);
+    setMbLaunch(mb.launch_date ?? '');
+  };
+
+  const applyRamKitSelection = (kit: RamKit) => {
+    setRamKitId(kit.id);
+    setRamGb(kit.capacity_gb?.toString() ?? '');
+    setRamSpeed(kit.speed_mhz?.toString() ?? '');
+    setRamType(kit.ram_type ?? '');
+    setRamPc(kit.pc_rating ?? '');
+  };
+
+  const applyPsuSelection = (psu: Psu) => {
+    setPsuId(psu.id);
+    setPsuBrand(psu.brand);
+    setPsuWattage(psu.wattage?.toString() ?? '');
+    setPsu8Pin(
+      psu.has_8pin_cpu === null ? 'unknown' : psu.has_8pin_cpu ? 'yes' : 'no',
+    );
+    setPsu6Pin(
+      psu.has_6pin_pcie === null ? 'unknown' : psu.has_6pin_pcie ? 'yes' : 'no',
+    );
+  };
+
+  const applyWifiCardSelection = (wifi: WifiCard) => {
+    setWifiCardId(wifi.id);
+    setWifiBrand(wifi.brand);
+    setWifiProduct(wifi.product ?? '');
+    setWifiModel(wifi.model);
+    setWifiStandard(wifi.wifi_standard ?? '');
+    setBluetooth(wifi.bluetooth_version ?? '');
+    setWifiFormFactor(wifi.form_factor ?? '');
+  };
+
+  const applyDriveModelSelection = (idx: number, dm: StorageDriveModel) => {
+    setDrives((prev) =>
+      prev.map((row, i) =>
+        i === idx
+          ? {
+              ...row,
+              storage_drive_model_id: dm.id,
+              capacity_gb: dm.capacity_gb,
+              form_factor: dm.form_factor,
+              brand: dm.brand ?? '',
+              model: dm.model,
+              model_number: dm.model_number,
+              nand_type: dm.nand_type,
+              read_mb_s: dm.read_mb_s,
+              write_mb_s: dm.write_mb_s,
+              spec_url: dm.spec_url,
+              spec_links: (dm.spec_links ?? []).map((l) => ({ ...l })),
+            }
+          : row,
+      ),
+    );
+  };
+
+  useEffect(() => {
+    if (!recentlyCreatedCatalogPart) return;
+    const { targetSlot, part } = recentlyCreatedCatalogPart;
+    if (targetSlot === 'gpu_card_id') {
+      applyGpuCardSelection(part as GpuCard);
+    } else if (targetSlot === 'motherboard_id') {
+      applyMotherboardSelection(part as Motherboard);
+    } else if (targetSlot === 'ram_kit_id') {
+      applyRamKitSelection(part as RamKit);
+    } else if (targetSlot === 'psu_id') {
+      applyPsuSelection(part as Psu);
+    } else if (targetSlot === 'case_id') {
+      setCaseId((part as PcCase).id);
+    } else if (targetSlot === 'cooler_id') {
+      setCoolerId((part as Cooler).id);
+    } else if (targetSlot === 'wifi_card_id') {
+      applyWifiCardSelection(part as WifiCard);
+    } else if (targetSlot.startsWith('drive:')) {
+      const idx = Number.parseInt(targetSlot.slice(6), 10);
+      if (Number.isFinite(idx)) {
+        applyDriveModelSelection(idx, part as StorageDriveModel);
+      }
+    }
+  }, [recentlyCreatedCatalogPart]);
+
+  // Usage counts for combobox badges
+  const installedMaps = useMemo(() => {
+    const cpu = new Map<number, number>();
+    const gpu = new Map<number, number>();
+    const gpuCard = new Map<number, number>();
+    const mb = new Map<number, number>();
+    const ram = new Map<number, number>();
+    const drive = new Map<number, number>();
+    const psu = new Map<number, number>();
+    const pcCase = new Map<number, number>();
+    const cooler = new Map<number, number>();
+    const wifi = new Map<number, number>();
+
+    for (const c of computers) {
+      if (c.cpu_id) cpu.set(c.cpu_id, (cpu.get(c.cpu_id) ?? 0) + c.cpu_count);
+      if (c.gpu_id) gpu.set(c.gpu_id, (gpu.get(c.gpu_id) ?? 0) + 1);
+      if (c.gpu_card_id)
+        gpuCard.set(c.gpu_card_id, (gpuCard.get(c.gpu_card_id) ?? 0) + 1);
+      if (c.motherboard_id)
+        mb.set(c.motherboard_id, (mb.get(c.motherboard_id) ?? 0) + 1);
+      if (c.ram_kit_id) ram.set(c.ram_kit_id, (ram.get(c.ram_kit_id) ?? 0) + 1);
+      if (c.psu_id) psu.set(c.psu_id, (psu.get(c.psu_id) ?? 0) + 1);
+      if (c.case_id) pcCase.set(c.case_id, (pcCase.get(c.case_id) ?? 0) + 1);
+      if (c.cooler_id)
+        cooler.set(c.cooler_id, (cooler.get(c.cooler_id) ?? 0) + 1);
+      if (c.wifi_card_id)
+        wifi.set(c.wifi_card_id, (wifi.get(c.wifi_card_id) ?? 0) + 1);
+      for (const d of c.storage_drives) {
+        if (d.storage_drive_model_id) {
+          drive.set(
+            d.storage_drive_model_id,
+            (drive.get(d.storage_drive_model_id) ?? 0) + 1,
+          );
+        }
+      }
+    }
+
+    return { cpu, gpu, gpuCard, mb, ram, drive, psu, pcCase, cooler, wifi };
+  }, [computers]);
+
+  const cpuSpareMap = useMemo(
+    () => new Map(cpus.map((c) => [c.id, c.spare_count])),
+    [cpus],
+  );
+
+  const pendingSwaps = useMemo(() => {
+    if (!editingRig || editingRig.device_type !== 'Desktop' || deviceType !== 'Desktop') {
+      return [];
+    }
+    const before = snapshotFromRig(editingRig);
+    const after = {
+      cpuId,
+      cpuCount: Math.max(1, intOrNull(cpuCount) ?? 1),
+      gpuCardId,
+      motherboardId,
+      ramKitId,
+      psuId,
+      caseId,
+      coolerId,
+      wifiCardId,
+      driveModelIds: drives
+        .map((d) => d.storage_drive_model_id)
+        .filter((id): id is number => id !== null),
+    };
+    return computeDesktopSwapAdjustments(before, after, {
+      cpus,
+      gpuCards,
+      motherboards,
+      ramKits,
+      storageDriveModels,
+      psus,
+      cases,
+      coolers,
+      wifiCards,
+    });
+  }, [
+    editingRig,
+    deviceType,
+    cpuId,
+    cpuCount,
+    gpuCardId,
+    motherboardId,
+    ramKitId,
+    psuId,
+    caseId,
+    coolerId,
+    wifiCardId,
+    drives,
+    cpus,
+    gpuCards,
+    motherboards,
+    ramKits,
+    storageDriveModels,
+    psus,
+    cases,
+    coolers,
+    wifiCards,
+  ]);
+
   const previewStanding = useMemo(() => {
     const virtualId = editingRig?.id ?? -1;
     const selectedCpu =
@@ -305,24 +588,31 @@ export function ComputerFormModal({
       cpu_id: cpuId,
       cpu_count: parsedCpuCount,
       gpu_id: gpuId,
+      gpu_card_id: gpuCardId,
       gpu_aib_manufacturer: gpuAibMfg.trim() || null,
       gpu_aib_model: gpuAibModel.trim() || null,
       igpu_id: igpuId,
+      motherboard_id: motherboardId,
       motherboard_name: mbName.trim() || null,
       motherboard_brand: mbBrand.trim() || null,
       motherboard_launch: mbLaunch.trim() || null,
+      ram_kit_id: ramKitId,
       ram_gb: intOrNull(ramGb),
       ram_speed_mhz: intOrNull(ramSpeed),
       ram_type: ramType.trim() || null,
       ram_pc_rating: ramPc.trim() || null,
+      psu_id: psuId,
       psu_wattage: intOrNull(psuWattage),
       psu_brand: psuBrand.trim() || null,
       psu_has_8pin_cpu: null,
       psu_has_6pin_pcie: null,
       power_adapter_notes: powerAdapterNotes.trim() || null,
+      case_id: caseId,
+      cooler_id: coolerId,
       screen_size_inches: floatOrNull(screenSize),
       screen_resolution: screenRes.trim() || null,
       weight_lbs: floatOrNull(weightLbs),
+      wifi_card_id: wifiCardId,
       wifi_brand: wifiBrand.trim() || null,
       wifi_product: wifiProduct.trim() || null,
       wifi_model: wifiModel.trim() || null,
@@ -333,13 +623,20 @@ export function ComputerFormModal({
       wifi_max_speed: editingRig?.wifi_max_speed ?? null,
       wifi_standard: wifiStandard.trim() || null,
       bluetooth_version: bluetooth.trim() || null,
-      wifi_form_factor: editingRig?.wifi_form_factor ?? null,
+      wifi_form_factor: wifiFormFactor.trim() || null,
       part_spec_links: editingRig?.part_spec_links ?? {},
       created_at: editingRig?.created_at ?? '',
       updated_at: editingRig?.updated_at ?? '',
       cpu: selectedCpu,
       gpu: selectedGpu,
+      gpu_card: null,
       igpu: selectedIgpu,
+      motherboard: null,
+      ram_kit: null,
+      psu: null,
+      pc_case: null,
+      cooler: null,
+      wifi_card: null,
       storage_drives: editingRig?.storage_drives ?? [],
       benchmarks: editingRig?.benchmarks ?? [],
     };
@@ -356,8 +653,15 @@ export function ComputerFormModal({
     gpus,
     cpuId,
     cpuCount,
+    gpuCardId,
     gpuId,
     igpuId,
+    motherboardId,
+    ramKitId,
+    psuId,
+    caseId,
+    coolerId,
+    wifiCardId,
     name,
     deviceType,
     brand,
@@ -385,6 +689,7 @@ export function ComputerFormModal({
     wifiModel,
     wifiStandard,
     bluetooth,
+    wifiFormFactor,
   ]);
 
   if (!open) return null;
@@ -392,7 +697,7 @@ export function ComputerFormModal({
   const isLaptop = deviceType === 'Laptop';
   const relevantLinkSlots: ComputerPartLinkSlot[] = isLaptop
     ? ['laptop', 'wifi', 'ram', 'gpu_aib']
-    : ['gpu_aib', 'motherboard', 'psu', 'ram'];
+    : ['gpu_aib', 'motherboard', 'psu', 'ram', 'wifi'];
   const populatedLinkSlotsCount = relevantLinkSlots.filter((slot) => {
     const entry = partSpecLinks[slot];
     return Boolean(
@@ -400,6 +705,15 @@ export function ComputerFormModal({
         entry?.links.some((l) => l.label.trim() || l.url.trim()),
     );
   }).length;
+
+  const toggleSwapKey = (key: string) => {
+    setUncheckedSwapKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -436,7 +750,9 @@ export function ComputerFormModal({
         }
         const parsedExtra = parseHttpUrl(url);
         if (!parsedExtra.valid || !parsedExtra.normalizedUrl) {
-          setError(`${slotLabel} link "${lbl}": ${parsedExtra.error ?? 'URL is required.'}`);
+          setError(
+            `${slotLabel} link "${lbl}": ${parsedExtra.error ?? 'URL is required.'}`,
+          );
           setLinksSectionOpen(true);
           return;
         }
@@ -470,6 +786,10 @@ export function ComputerFormModal({
       });
     }
 
+    const activeAdjustments: SpareAdjustment[] = pendingSwaps
+      .filter((item) => !uncheckedSwapKeys.has(item.key))
+      .map(({ table, id, delta }) => ({ table, id, delta }));
+
     setSaving(true);
     setError(null);
     try {
@@ -486,16 +806,20 @@ export function ComputerFormModal({
           cpu_id: cpuId,
           cpu_count: Math.max(1, intOrNull(cpuCount) ?? 1),
           gpu_id: gpuId,
+          gpu_card_id: gpuCardId,
           gpu_aib_manufacturer: gpuAibMfg.trim() || null,
           gpu_aib_model: gpuAibModel.trim() || null,
           igpu_id: igpuId,
+          motherboard_id: motherboardId,
           motherboard_name: mbName.trim() || null,
           motherboard_brand: mbBrand.trim() || null,
           motherboard_launch: mbLaunch.trim() || null,
+          ram_kit_id: ramKitId,
           ram_gb: intOrNull(ramGb),
           ram_speed_mhz: intOrNull(ramSpeed),
           ram_type: ramType.trim() || null,
           ram_pc_rating: ramPc.trim() || null,
+          psu_id: psuId,
           psu_wattage: intOrNull(psuWattage),
           psu_brand: psuBrand.trim() || null,
           psu_has_8pin_cpu:
@@ -503,9 +827,12 @@ export function ComputerFormModal({
           psu_has_6pin_pcie:
             psu6Pin === 'unknown' ? null : psu6Pin === 'yes',
           power_adapter_notes: powerAdapterNotes.trim() || null,
+          case_id: caseId,
+          cooler_id: coolerId,
           screen_size_inches: floatOrNull(screenSize),
           screen_resolution: screenRes.trim() || null,
           weight_lbs: floatOrNull(weightLbs),
+          wifi_card_id: wifiCardId,
           wifi_brand: wifiBrand.trim() || null,
           wifi_product: wifiProduct.trim() || null,
           wifi_model: wifiModel.trim() || null,
@@ -516,11 +843,12 @@ export function ComputerFormModal({
           wifi_max_speed: editingRig?.wifi_max_speed ?? null,
           wifi_standard: wifiStandard.trim() || null,
           bluetooth_version: bluetooth.trim() || null,
-          wifi_form_factor: editingRig?.wifi_form_factor ?? null,
+          wifi_form_factor: wifiFormFactor.trim() || null,
           part_spec_links: sanitizedPartSpecLinks,
         },
         normalizedDrives,
         editingRig?.id,
+        activeAdjustments,
       );
       onClose();
     } catch (err) {
@@ -673,6 +1001,9 @@ export function ComputerFormModal({
                   parts={cpus}
                   selectedId={cpuId}
                   onSelect={setCpuId}
+                  hideMobileByDefault={!isLaptop}
+                  spareCountById={cpuSpareMap}
+                  installedCountById={installedMaps.cpu}
                   onOpenLookup={(mode, q) =>
                     onOpenPartLookup('cpu', mode, q, 'cpu_id')
                   }
@@ -692,13 +1023,52 @@ export function ComputerFormModal({
               </div>
             </div>
 
+            {!isLaptop ? (
+              <CatalogPartCombobox
+                label="GPU Card (Owned AIB Model)"
+                items={gpuCards}
+                selectedId={gpuCardId}
+                onSelect={(id) => {
+                  if (id === null) {
+                    setGpuCardId(null);
+                    return;
+                  }
+                  const card = gpuCards.find((c) => c.id === id);
+                  if (card) applyGpuCardSelection(card);
+                }}
+                onAddNew={(q) =>
+                  onOpenCreateCatalogPart('gpu_card', q, 'gpu_card_id')
+                }
+                addNewLabel="Add New GPU Card"
+                getLabel={formatGpuCardLabel}
+                getSubtitle={formatGpuCardSubtitle}
+                getSpareCount={(c) => c.spare_count}
+                getInstalledCount={(c) => installedMaps.gpuCard.get(c.id) ?? 0}
+                placeholder="Select saved GPU card (auto-fills chip & board partner)..."
+              />
+            ) : null}
+
             <div className="grid gap-3 sm:grid-cols-2">
               <PartCombobox
                 partType="gpu"
-                label="Primary Graphics Card (GPU)"
+                label={
+                  isLaptop
+                    ? 'Primary Graphics Card (GPU)'
+                    : 'GPU Silicon (Chip)'
+                }
                 parts={gpus}
                 selectedId={gpuId}
-                onSelect={setGpuId}
+                onSelect={(id) => {
+                  setGpuId(id);
+                  if (gpuCardId !== null) {
+                    const currentCard = gpuCards.find((c) => c.id === gpuCardId);
+                    if (currentCard && currentCard.gpu_id !== id) {
+                      setGpuCardId(null);
+                    }
+                  }
+                }}
+                hideMobileByDefault={!isLaptop}
+                installedCountById={installedMaps.gpu}
                 onOpenLookup={(mode, q) =>
                   onOpenPartLookup('gpu', mode, q, 'gpu_id')
                 }
@@ -709,6 +1079,8 @@ export function ComputerFormModal({
                 parts={gpus}
                 selectedId={igpuId}
                 onSelect={setIgpuId}
+                hideMobileByDefault={!isLaptop}
+                installedCountById={installedMaps.gpu}
                 onOpenLookup={(mode, q) =>
                   onOpenPartLookup('gpu', mode, q, 'igpu_id')
                 }
@@ -745,138 +1117,301 @@ export function ComputerFormModal({
           </div>
 
           {/* Memory */}
-          <div className="grid gap-3 sm:grid-cols-4">
-            <div>
-              <label className="mb-1 block text-slate-400">RAM (GB)</label>
-              <input
-                type="number"
-                value={ramGb}
-                onChange={(e) => setRamGb(e.target.value)}
-                className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-1.5 text-white"
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-slate-400">
-                RAM Speed (MHz)
-              </label>
-              <input
-                type="number"
-                value={ramSpeed}
-                onChange={(e) => setRamSpeed(e.target.value)}
-                className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-1.5 text-white"
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-slate-400">RAM Type</label>
-              <input
-                type="text"
-                value={ramType}
-                onChange={(e) => setRamType(e.target.value)}
-                placeholder="DDR4 / DDR3 / LPDDR5X"
-                className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-1.5 text-white"
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-slate-400">PC Rating</label>
-              <input
-                type="text"
-                value={ramPc}
-                onChange={(e) => setRamPc(e.target.value)}
-                className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-1.5 text-white"
-              />
+          <div className="space-y-3 rounded-xl border border-slate-800 bg-slate-950/50 p-4">
+            <CatalogPartCombobox
+              label={
+                isLaptop
+                  ? 'Memory (RAM Kit — Optional for replaceable SO-DIMMs)'
+                  : 'Memory (RAM Kit)'
+              }
+              items={ramKits}
+              selectedId={ramKitId}
+              onSelect={(id) => {
+                if (id === null) {
+                  setRamKitId(null);
+                  return;
+                }
+                const kit = ramKits.find((k) => k.id === id);
+                if (kit) applyRamKitSelection(kit);
+              }}
+              onAddNew={(q) =>
+                onOpenCreateCatalogPart('ram_kit', q, 'ram_kit_id')
+              }
+              addNewLabel="Add New RAM Kit"
+              getLabel={formatRamKitLabel}
+              getSubtitle={formatRamKitSubtitle}
+              getSpareCount={(k) => k.spare_count}
+              getInstalledCount={(k) => installedMaps.ram.get(k.id) ?? 0}
+              isItemMobile={(k) => k.is_mobile}
+              hideMobileByDefault={!isLaptop}
+              placeholder="Select RAM kit from catalog or enter specs below..."
+            />
+
+            <div className="grid gap-3 sm:grid-cols-4">
+              <div>
+                <label className="mb-1 block text-slate-400">RAM (GB)</label>
+                <input
+                  type="number"
+                  value={ramGb}
+                  onChange={(e) => setRamGb(e.target.value)}
+                  className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-1.5 text-white"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-slate-400">
+                  RAM Speed (MHz)
+                </label>
+                <input
+                  type="number"
+                  value={ramSpeed}
+                  onChange={(e) => setRamSpeed(e.target.value)}
+                  className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-1.5 text-white"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-slate-400">RAM Type</label>
+                <input
+                  type="text"
+                  value={ramType}
+                  onChange={(e) => setRamType(e.target.value)}
+                  placeholder="DDR4 / DDR3 / LPDDR5X"
+                  className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-1.5 text-white"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-slate-400">PC Rating</label>
+                <input
+                  type="text"
+                  value={ramPc}
+                  onChange={(e) => setRamPc(e.target.value)}
+                  className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-1.5 text-white"
+                />
+              </div>
             </div>
           </div>
 
           {/* Device-specific Section */}
           {!isLaptop ? (
-            <div className="space-y-3 rounded-xl border border-slate-800 bg-slate-950/50 p-4">
+            <div className="space-y-4 rounded-xl border border-slate-800 bg-slate-950/50 p-4">
               <div className="font-semibold text-sky-300 uppercase">
-                Desktop Motherboard &amp; Power Supply
+                Desktop Motherboard, Chassis, Cooling, Power &amp; Wi-Fi
               </div>
-              <div className="grid gap-3 sm:grid-cols-3">
-                <div>
-                  <label className="mb-1 block text-slate-400">
-                    Motherboard Brand
-                  </label>
-                  <input
-                    type="text"
-                    value={mbBrand}
-                    onChange={(e) => setMbBrand(e.target.value)}
-                    className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-1.5 text-white"
-                  />
-                </div>
-                <div>
-                  <label className="mb-1 block text-slate-400">
-                    Motherboard Model
-                  </label>
-                  <input
-                    type="text"
-                    value={mbName}
-                    onChange={(e) => setMbName(e.target.value)}
-                    className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-1.5 text-white"
-                  />
-                </div>
-                <div>
-                  <label className="mb-1 block text-slate-400">
-                    Motherboard Launch
-                  </label>
-                  <input
-                    type="text"
-                    value={mbLaunch}
-                    onChange={(e) => setMbLaunch(e.target.value)}
-                    className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-1.5 text-white"
-                  />
-                </div>
-                <div>
-                  <label className="mb-1 block text-slate-400">
-                    PSU Wattage (W)
-                  </label>
-                  <input
-                    type="number"
-                    value={psuWattage}
-                    onChange={(e) => setPsuWattage(e.target.value)}
-                    className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-1.5 text-white"
-                  />
-                </div>
-                <div>
-                  <label className="mb-1 block text-slate-400">PSU Brand</label>
-                  <input
-                    type="text"
-                    value={psuBrand}
-                    onChange={(e) => setPsuBrand(e.target.value)}
-                    className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-1.5 text-white"
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-2">
+
+              {/* Motherboard */}
+              <div className="space-y-2.5">
+                <CatalogPartCombobox
+                  label="Motherboard"
+                  items={motherboards}
+                  selectedId={motherboardId}
+                  onSelect={(id) => {
+                    if (id === null) {
+                      setMotherboardId(null);
+                      return;
+                    }
+                    const mb = motherboards.find((m) => m.id === id);
+                    if (mb) applyMotherboardSelection(mb);
+                  }}
+                  onAddNew={(q) =>
+                    onOpenCreateCatalogPart('motherboard', q, 'motherboard_id')
+                  }
+                  addNewLabel="Add New Motherboard"
+                  getLabel={formatMotherboardLabel}
+                  getSubtitle={formatMotherboardSubtitle}
+                  getSpareCount={(m) => m.spare_count}
+                  getInstalledCount={(m) => installedMaps.mb.get(m.id) ?? 0}
+                  placeholder="Select motherboard from catalog..."
+                />
+                <div className="grid gap-3 sm:grid-cols-3">
                   <div>
-                    <label className="mb-1 block text-slate-400">8-pin CPU</label>
-                    <select
-                      value={psu8Pin}
-                      onChange={(e) =>
-                        setPsu8Pin(e.target.value as 'unknown' | 'yes' | 'no')
-                      }
-                      className="w-full rounded-lg border border-slate-700 bg-slate-950 px-2 py-1.5 text-white"
-                    >
-                      <option value="unknown">—</option>
-                      <option value="yes">Yes</option>
-                      <option value="no">No</option>
-                    </select>
+                    <label className="mb-1 block text-slate-400">
+                      Motherboard Brand
+                    </label>
+                    <input
+                      type="text"
+                      value={mbBrand}
+                      onChange={(e) => setMbBrand(e.target.value)}
+                      className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-1.5 text-white"
+                    />
                   </div>
                   <div>
-                    <label className="mb-1 block text-slate-400">6-pin PCIe</label>
-                    <select
-                      value={psu6Pin}
-                      onChange={(e) =>
-                        setPsu6Pin(e.target.value as 'unknown' | 'yes' | 'no')
-                      }
-                      className="w-full rounded-lg border border-slate-700 bg-slate-950 px-2 py-1.5 text-white"
-                    >
-                      <option value="unknown">—</option>
-                      <option value="yes">Yes</option>
-                      <option value="no">No</option>
-                    </select>
+                    <label className="mb-1 block text-slate-400">
+                      Motherboard Model
+                    </label>
+                    <input
+                      type="text"
+                      value={mbName}
+                      onChange={(e) => setMbName(e.target.value)}
+                      className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-1.5 text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-slate-400">
+                      Motherboard Launch
+                    </label>
+                    <input
+                      type="text"
+                      value={mbLaunch}
+                      onChange={(e) => setMbLaunch(e.target.value)}
+                      className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-1.5 text-white"
+                    />
                   </div>
                 </div>
+              </div>
+
+              {/* PSU */}
+              <div className="space-y-2.5 border-t border-slate-800/80 pt-3">
+                <CatalogPartCombobox
+                  label="Power Supply (PSU)"
+                  items={psus}
+                  selectedId={psuId}
+                  onSelect={(id) => {
+                    if (id === null) {
+                      setPsuId(null);
+                      return;
+                    }
+                    const p = psus.find((x) => x.id === id);
+                    if (p) applyPsuSelection(p);
+                  }}
+                  onAddNew={(q) => onOpenCreateCatalogPart('psu', q, 'psu_id')}
+                  addNewLabel="Add New PSU"
+                  getLabel={formatPsuLabel}
+                  getSubtitle={formatPsuSubtitle}
+                  getSpareCount={(p) => p.spare_count}
+                  getInstalledCount={(p) => installedMaps.psu.get(p.id) ?? 0}
+                  placeholder="Select PSU from catalog..."
+                />
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <div>
+                    <label className="mb-1 block text-slate-400">
+                      PSU Wattage (W)
+                    </label>
+                    <input
+                      type="number"
+                      value={psuWattage}
+                      onChange={(e) => setPsuWattage(e.target.value)}
+                      className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-1.5 text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-slate-400">
+                      PSU Brand
+                    </label>
+                    <input
+                      type="text"
+                      value={psuBrand}
+                      onChange={(e) => setPsuBrand(e.target.value)}
+                      className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-1.5 text-white"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="mb-1 block text-slate-400">
+                        8-pin CPU
+                      </label>
+                      <select
+                        value={psu8Pin}
+                        onChange={(e) =>
+                          setPsu8Pin(
+                            e.target.value as 'unknown' | 'yes' | 'no',
+                          )
+                        }
+                        className="w-full rounded-lg border border-slate-700 bg-slate-950 px-2 py-1.5 text-white"
+                      >
+                        <option value="unknown">—</option>
+                        <option value="yes">Yes</option>
+                        <option value="no">No</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-slate-400">
+                        6-pin PCIe
+                      </label>
+                      <select
+                        value={psu6Pin}
+                        onChange={(e) =>
+                          setPsu6Pin(
+                            e.target.value as 'unknown' | 'yes' | 'no',
+                          )
+                        }
+                        className="w-full rounded-lg border border-slate-700 bg-slate-950 px-2 py-1.5 text-white"
+                      >
+                        <option value="unknown">—</option>
+                        <option value="yes">Yes</option>
+                        <option value="no">No</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Case & Cooler */}
+              <div className="grid gap-3 border-t border-slate-800/80 pt-3 sm:grid-cols-2">
+                <CatalogPartCombobox
+                  label="PC Case"
+                  items={cases}
+                  selectedId={caseId}
+                  onSelect={setCaseId}
+                  onAddNew={(q) => onOpenCreateCatalogPart('case', q, 'case_id')}
+                  addNewLabel="Add New Case"
+                  getLabel={formatCaseLabel}
+                  getSubtitle={formatCaseSubtitle}
+                  getSpareCount={(c) => c.spare_count}
+                  getInstalledCount={(c) =>
+                    installedMaps.pcCase.get(c.id) ?? 0
+                  }
+                  placeholder="Select PC case..."
+                />
+                <CatalogPartCombobox
+                  label="CPU Cooler"
+                  items={coolers}
+                  selectedId={coolerId}
+                  onSelect={setCoolerId}
+                  onAddNew={(q) =>
+                    onOpenCreateCatalogPart('cooler', q, 'cooler_id')
+                  }
+                  addNewLabel="Add New Cooler"
+                  getLabel={formatCoolerLabel}
+                  getSubtitle={formatCoolerSubtitle}
+                  getSpareCount={(c) => c.spare_count}
+                  getInstalledCount={(c) =>
+                    installedMaps.cooler.get(c.id) ?? 0
+                  }
+                  placeholder="Select CPU cooler..."
+                />
+              </div>
+
+              {/* Optional Desktop Wi-Fi Card */}
+              <div className="border-t border-slate-800/80 pt-3">
+                <CatalogPartCombobox
+                  label="Wi-Fi Card (Optional)"
+                  items={wifiCards}
+                  selectedId={wifiCardId}
+                  onSelect={(id) => {
+                    if (id === null) {
+                      setWifiCardId(null);
+                      setWifiBrand('');
+                      setWifiProduct('');
+                      setWifiModel('');
+                      setWifiStandard('');
+                      setBluetooth('');
+                      setWifiFormFactor('');
+                      return;
+                    }
+                    const w = wifiCards.find((x) => x.id === id);
+                    if (w) applyWifiCardSelection(w);
+                  }}
+                  onAddNew={(q) =>
+                    onOpenCreateCatalogPart('wifi_card', q, 'wifi_card_id')
+                  }
+                  addNewLabel="Add New Wi-Fi Card"
+                  getLabel={formatWifiCardLabel}
+                  getSubtitle={formatWifiCardSubtitle}
+                  getSpareCount={(w) => w.spare_count}
+                  getInstalledCount={(w) => installedMaps.wifi.get(w.id) ?? 0}
+                  isItemMobile={(w) => w.is_mobile}
+                  hideMobileByDefault={true}
+                  placeholder="Optional PCIe / M.2 / USB Wi-Fi card..."
+                />
               </div>
             </div>
           ) : (
@@ -933,6 +1468,36 @@ export function ComputerFormModal({
                     className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-1.5 text-white"
                   />
                 </div>
+              </div>
+
+              <div className="border-t border-slate-800/80 pt-3">
+                <CatalogPartCombobox
+                  label="Wi-Fi Card (Catalog)"
+                  items={wifiCards}
+                  selectedId={wifiCardId}
+                  onSelect={(id) => {
+                    if (id === null) {
+                      setWifiCardId(null);
+                      return;
+                    }
+                    const w = wifiCards.find((x) => x.id === id);
+                    if (w) applyWifiCardSelection(w);
+                  }}
+                  onAddNew={(q) =>
+                    onOpenCreateCatalogPart('wifi_card', q, 'wifi_card_id')
+                  }
+                  addNewLabel="Add New Wi-Fi Card"
+                  getLabel={formatWifiCardLabel}
+                  getSubtitle={formatWifiCardSubtitle}
+                  getSpareCount={(w) => w.spare_count}
+                  getInstalledCount={(w) => installedMaps.wifi.get(w.id) ?? 0}
+                  isItemMobile={(w) => w.is_mobile}
+                  hideMobileByDefault={false}
+                  placeholder="Select saved Wi-Fi card or edit fields below..."
+                />
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-4">
                 <div>
                   <label className="mb-1 block text-slate-400">
                     Wi-Fi Brand
@@ -981,7 +1546,7 @@ export function ComputerFormModal({
           )}
 
           {/* Storage Drives */}
-          <div className="space-y-2.5 rounded-xl border border-slate-800 bg-slate-950/50 p-4">
+          <div className="space-y-3 rounded-xl border border-slate-800 bg-slate-950/50 p-4">
             <div className="flex items-center justify-between">
               <span className="font-semibold text-slate-300 uppercase">
                 Storage Drives
@@ -992,6 +1557,7 @@ export function ComputerFormModal({
                   setDrives((prev) => [
                     ...prev,
                     {
+                      storage_drive_model_id: null,
                       capacity_gb: null,
                       form_factor: 'NVMe',
                       brand: '',
@@ -1019,7 +1585,45 @@ export function ComputerFormModal({
               );
               const linkOpen = Boolean(expandedDriveLinks[idx]);
               return (
-                <div key={idx} className="space-y-1.5">
+                <div
+                  key={idx}
+                  className="space-y-2 rounded-lg border border-slate-800/90 bg-slate-900/40 p-2.5"
+                >
+                  <CatalogPartCombobox
+                    compact
+                    items={storageDriveModels}
+                    selectedId={d.storage_drive_model_id}
+                    onSelect={(id) => {
+                      if (id === null) {
+                        setDrives((prev) =>
+                          prev.map((row, i) =>
+                            i === idx
+                              ? { ...row, storage_drive_model_id: null }
+                              : row,
+                          ),
+                        );
+                        return;
+                      }
+                      const dm = storageDriveModels.find((m) => m.id === id);
+                      if (dm) applyDriveModelSelection(idx, dm);
+                    }}
+                    onAddNew={(q) =>
+                      onOpenCreateCatalogPart(
+                        'storage_drive_model',
+                        q,
+                        `drive:${idx}`,
+                      )
+                    }
+                    addNewLabel="Add New Drive Model"
+                    getLabel={formatStorageDriveModelLabel}
+                    getSubtitle={formatStorageDriveModelSubtitle}
+                    getSpareCount={(dm) => dm.spare_count}
+                    getInstalledCount={(dm) =>
+                      installedMaps.drive.get(dm.id) ?? 0
+                    }
+                    placeholder="Select drive model from catalog (auto-fills specs)..."
+                  />
+
                   <div className="grid items-center gap-2 sm:grid-cols-12">
                     <input
                       type="number"
@@ -1282,6 +1886,62 @@ export function ComputerFormModal({
             />
           </div>
 
+          {/* Swap-to-Spare Checklist */}
+          {pendingSwaps.length > 0 ? (
+            <div className="space-y-2 rounded-xl border border-amber-500/35 bg-amber-500/10 p-3.5">
+              <div className="flex items-center gap-2 text-xs font-semibold text-amber-200">
+                <ArrowRightLeft className="h-4 w-4 text-amber-400" />
+                Desktop Swap-to-Spare Updates
+              </div>
+              <p className="text-[11px] text-slate-300">
+                Checked items update catalog spare counts on save. Uncheck any
+                entry if you are correcting a typo instead of swapping hardware.
+              </p>
+              <div className="space-y-1.5 pt-1">
+                {pendingSwaps.map((item) => {
+                  const checked = !uncheckedSwapKeys.has(item.key);
+                  const nextSpare = Math.max(0, item.currentSpare + item.delta);
+                  const isReturn = item.delta > 0;
+                  return (
+                    <label
+                      key={item.key}
+                      className="flex cursor-pointer items-center justify-between gap-3 rounded-lg border border-slate-800/90 bg-slate-950/70 px-3 py-2 text-xs"
+                    >
+                      <span className="flex min-w-0 items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleSwapKey(item.key)}
+                          className="rounded border-slate-600 bg-slate-900 text-cyan-500"
+                        />
+                        <span className="shrink-0 font-medium text-slate-400">
+                          {item.slotLabel}:
+                        </span>
+                        <span className="truncate font-semibold text-white">
+                          {item.partLabel}
+                        </span>
+                      </span>
+                      <span
+                        className={`shrink-0 rounded border px-2 py-0.5 font-mono text-[11px] ${
+                          isReturn
+                            ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300'
+                            : 'border-amber-500/40 bg-amber-500/15 text-amber-200'
+                        }`}
+                      >
+                        {item.delta > 0 ? `+${item.delta}` : item.delta} spare (
+                        {item.currentSpare} → {nextSpare}
+                        {!isReturn && item.currentSpare === 0
+                          ? ', already 0'
+                          : ''}
+                        )
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
+
           {error ? (
             <div className="rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-rose-300">
               {error}
@@ -1301,7 +1961,11 @@ export function ComputerFormModal({
               disabled={saving}
               className="rounded-lg bg-cyan-500 px-5 py-2 font-semibold text-slate-950 hover:bg-cyan-400 disabled:opacity-60"
             >
-              {saving ? 'Saving...' : editingRig ? 'Save Changes' : 'Create Rig'}
+              {saving
+                ? 'Saving...'
+                : editingRig
+                  ? 'Save Changes'
+                  : 'Create Rig'}
             </button>
           </div>
         </form>

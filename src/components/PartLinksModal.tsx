@@ -13,6 +13,7 @@ import type {
   Gpu,
   PartSpecLinkEntry,
   PartSpecLinksMap,
+  SpareTableName,
   SpecLinkItem,
   StorageDrive,
 } from '../types/database';
@@ -21,6 +22,16 @@ export type PartLinksEditTarget =
   | { kind: 'cpu'; cpu: Cpu }
   | { kind: 'gpu'; gpu: Gpu }
   | { kind: 'storage_drive'; rigName: string; drive: StorageDrive }
+  | {
+      kind: 'catalog_part';
+      table: Exclude<SpareTableName, 'cpus'>;
+      id: number;
+      presetKind: PartLinkPresetKind;
+      partLabel: string;
+      subtitle: string;
+      specUrl: string | null;
+      specLinks: SpecLinkItem[];
+    }
   | {
       kind: 'computer_slot';
       computerId: number;
@@ -44,6 +55,12 @@ interface PartLinksModalProps {
     specLinks: SpecLinkItem[],
   ) => Promise<void>;
   onSaveStorageDriveLinks: (
+    id: number,
+    specUrl: string | null,
+    specLinks: SpecLinkItem[],
+  ) => Promise<void>;
+  onSaveCatalogPartLinks: (
+    table: Exclude<SpareTableName, 'cpus'>,
     id: number,
     specUrl: string | null,
     specLinks: SpecLinkItem[],
@@ -107,6 +124,16 @@ function getTargetMeta(target: PartLinksEditTarget): {
         initialLinks: target.drive.spec_links ?? [],
       };
     }
+    case 'catalog_part': {
+      return {
+        presetKind: target.presetKind,
+        title: `Edit Links · ${target.partLabel}`,
+        subtitle: target.subtitle,
+        searchQuery: target.partLabel,
+        initialPrimary: target.specUrl ?? '',
+        initialLinks: target.specLinks ?? [],
+      };
+    }
     case 'computer_slot': {
       const existing = target.currentMap[target.slot];
       const slotMeta = COMPUTER_SLOT_META[target.slot];
@@ -128,6 +155,7 @@ export function PartLinksModal({
   onSaveCpuLinks,
   onSaveGpuLinks,
   onSaveStorageDriveLinks,
+  onSaveCatalogPartLinks,
   onSaveComputerSlotLinks,
 }: PartLinksModalProps) {
   const [primaryUrl, setPrimaryUrl] = useState('');
@@ -212,6 +240,13 @@ export function PartLinksModal({
       } else if (target.kind === 'storage_drive') {
         await onSaveStorageDriveLinks(
           target.drive.id,
+          parsedPrimary.normalizedUrl,
+          cleanedLinks,
+        );
+      } else if (target.kind === 'catalog_part') {
+        await onSaveCatalogPartLinks(
+          target.table,
+          target.id,
           parsedPrimary.normalizedUrl,
           cleanedLinks,
         );

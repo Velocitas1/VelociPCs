@@ -26,6 +26,7 @@ import {
   buildMotherboardResearchLinks,
   buildPsuResearchLinks,
   buildWifiResearchLinks,
+  mergePartSpecEntry,
 } from '../lib/specLinks';
 import type { ComputerWithRelations, DeviceType } from '../types/database';
 import { DirectXBadge } from './DirectXBadge';
@@ -130,6 +131,10 @@ export function InventoryView({
         c.igpu?.name,
         c.gpu_aib_manufacturer,
         c.gpu_aib_model,
+        c.pc_case?.brand,
+        c.pc_case?.model,
+        c.cooler?.brand,
+        c.cooler?.model,
       ]
         .filter(Boolean)
         .join(' ')
@@ -444,19 +449,33 @@ export function InventoryView({
                                 rig.motherboard_brand,
                                 rig.motherboard_name,
                                 rig.motherboard_launch,
-                                rig.part_spec_links?.motherboard,
+                                mergePartSpecEntry(
+                                  rig.motherboard,
+                                  rig.part_spec_links?.motherboard,
+                                ),
                               )}
                               onEditLinks={
                                 onEditPartLinks
                                   ? () =>
-                                      onEditPartLinks({
-                                        kind: 'computer_slot',
-                                        computerId: rig.id,
-                                        rigName: rig.name,
-                                        slot: 'motherboard',
-                                        partLabel: mbLabel,
-                                        currentMap: rig.part_spec_links,
-                                      })
+                                      rig.motherboard
+                                        ? onEditPartLinks({
+                                            kind: 'catalog_part',
+                                            table: 'motherboards',
+                                            id: rig.motherboard.id,
+                                            presetKind: 'motherboard',
+                                            partLabel: mbLabel,
+                                            subtitle: 'Motherboard Catalog Entry',
+                                            specUrl: rig.motherboard.spec_url,
+                                            specLinks: rig.motherboard.spec_links,
+                                          })
+                                        : onEditPartLinks({
+                                            kind: 'computer_slot',
+                                            computerId: rig.id,
+                                            rigName: rig.name,
+                                            slot: 'motherboard',
+                                            partLabel: mbLabel,
+                                            currentMap: rig.part_spec_links,
+                                          })
                                   : undefined
                               }
                             />
@@ -535,7 +554,10 @@ export function InventoryView({
                           links={buildGpuResearchLinks(rig.gpu, {
                             manufacturer: rig.gpu_aib_manufacturer,
                             model: rig.gpu_aib_model,
-                            savedEntry: rig.part_spec_links?.gpu_aib,
+                            savedEntry: mergePartSpecEntry(
+                              rig.gpu_card,
+                              rig.part_spec_links?.gpu_aib,
+                            ),
                           })}
                           stopPropagation
                           onEditLinks={
@@ -637,7 +659,10 @@ export function InventoryView({
                                 rig.wifi_brand,
                                 rig.wifi_product,
                                 rig.wifi_model,
-                                rig.part_spec_links?.wifi,
+                                mergePartSpecEntry(
+                                  rig.wifi_card,
+                                  rig.part_spec_links?.wifi,
+                                ),
                               )}
                               onEditLinks={
                                 onEditPartLinks
@@ -675,7 +700,10 @@ export function InventoryView({
                             links={buildPsuResearchLinks(
                               rig.psu_brand,
                               rig.psu_wattage,
-                              rig.part_spec_links?.psu,
+                              mergePartSpecEntry(
+                                rig.psu,
+                                rig.part_spec_links?.psu,
+                              ),
                             )}
                             onEditLinks={
                               onEditPartLinks

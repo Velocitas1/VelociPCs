@@ -52,6 +52,7 @@ export interface Cpu {
   passmark_score: number | null;
   score_updated_at: string | null;
   is_mobile: boolean;
+  spare_count: number;
   spec_url: string | null;
   spec_links: SpecLinkItem[];
   created_at: string;
@@ -82,9 +83,178 @@ export interface Gpu {
   updated_at: string;
 }
 
+export interface GpuCard {
+  id: number;
+  gpu_id: number;
+  brand: string;
+  model: string;
+  part_number: string | null;
+  cooling_type: string | null;
+  length_mm: number | null;
+  spare_count: number;
+  spec_url: string | null;
+  spec_links: SpecLinkItem[];
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+  gpu?: Gpu | null;
+}
+
+export interface Motherboard {
+  id: number;
+  brand: string;
+  model: string;
+  socket: string | null;
+  chipset: string | null;
+  form_factor: string | null;
+  memory_type: string | null;
+  launch_date: string | null;
+  spare_count: number;
+  spec_url: string | null;
+  spec_links: SpecLinkItem[];
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RamKit {
+  id: number;
+  brand: string | null;
+  model: string;
+  capacity_gb: number | null;
+  modules_count: number | null;
+  ram_type: string | null;
+  speed_mhz: number | null;
+  pc_rating: string | null;
+  is_mobile: boolean;
+  spare_count: number;
+  spec_url: string | null;
+  spec_links: SpecLinkItem[];
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface StorageDriveModel {
+  id: number;
+  brand: string | null;
+  model: string;
+  model_number: string | null;
+  capacity_gb: number | null;
+  form_factor: string | null;
+  nand_type: string | null;
+  read_mb_s: number | null;
+  write_mb_s: number | null;
+  spare_count: number;
+  spec_url: string | null;
+  spec_links: SpecLinkItem[];
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Psu {
+  id: number;
+  brand: string;
+  model: string;
+  wattage: number | null;
+  efficiency_rating: string | null;
+  modular: string | null;
+  has_8pin_cpu: boolean | null;
+  has_6pin_pcie: boolean | null;
+  spare_count: number;
+  spec_url: string | null;
+  spec_links: SpecLinkItem[];
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PcCase {
+  id: number;
+  brand: string;
+  model: string;
+  form_factor: string | null;
+  color: string | null;
+  max_gpu_length_mm: number | null;
+  spare_count: number;
+  spec_url: string | null;
+  spec_links: SpecLinkItem[];
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Cooler {
+  id: number;
+  brand: string;
+  model: string;
+  cooler_type: string | null;
+  fan_size_mm: number | null;
+  socket_support: string | null;
+  tdp_rating_w: number | null;
+  spare_count: number;
+  spec_url: string | null;
+  spec_links: SpecLinkItem[];
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WifiCard {
+  id: number;
+  brand: string;
+  product: string | null;
+  model: string;
+  wifi_standard: string | null;
+  bluetooth_version: string | null;
+  form_factor: string | null;
+  is_mobile: boolean;
+  spare_count: number;
+  spec_url: string | null;
+  spec_links: SpecLinkItem[];
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type CatalogPartCategory =
+  | 'gpu_card'
+  | 'motherboard'
+  | 'ram_kit'
+  | 'storage_drive_model'
+  | 'psu'
+  | 'case'
+  | 'cooler'
+  | 'wifi_card';
+
+export type CatalogPart =
+  | GpuCard
+  | Motherboard
+  | RamKit
+  | StorageDriveModel
+  | Psu
+  | PcCase
+  | Cooler
+  | WifiCard;
+
+export type SpareTableName =
+  | 'cpus'
+  | 'gpu_cards'
+  | 'motherboards'
+  | 'ram_kits'
+  | 'storage_drive_models'
+  | 'psus'
+  | 'cases'
+  | 'coolers'
+  | 'wifi_cards';
+
+export type PartsCatalogTab = 'gpus' | SpareTableName;
+
 export interface StorageDrive {
   id: number;
   computer_id: number;
+  storage_drive_model_id: number | null;
   capacity_gb: number | null;
   form_factor: string | null;
   brand: string | null;
@@ -99,6 +269,7 @@ export interface StorageDrive {
   spec_links: SpecLinkItem[];
   created_at: string;
   updated_at: string;
+  storage_drive_model?: StorageDriveModel | null;
 }
 
 export interface Benchmark {
@@ -131,24 +302,31 @@ export interface Computer {
   cpu_id: number | null;
   cpu_count: number;
   gpu_id: number | null;
+  gpu_card_id: number | null;
   gpu_aib_manufacturer: string | null;
   gpu_aib_model: string | null;
   igpu_id: number | null;
+  motherboard_id: number | null;
   motherboard_name: string | null;
   motherboard_brand: string | null;
   motherboard_launch: string | null;
+  ram_kit_id: number | null;
   ram_gb: number | null;
   ram_speed_mhz: number | null;
   ram_type: string | null;
   ram_pc_rating: string | null;
+  psu_id: number | null;
   psu_wattage: number | null;
   psu_brand: string | null;
   psu_has_8pin_cpu: boolean | null;
   psu_has_6pin_pcie: boolean | null;
   power_adapter_notes: string | null;
+  case_id: number | null;
+  cooler_id: number | null;
   screen_size_inches: number | null;
   screen_resolution: string | null;
   weight_lbs: number | null;
+  wifi_card_id: number | null;
   wifi_brand: string | null;
   wifi_product: string | null;
   wifi_model: string | null;
@@ -168,7 +346,14 @@ export interface Computer {
 export interface ComputerWithRelations extends Computer {
   cpu: Cpu | null;
   gpu: Gpu | null;
+  gpu_card: GpuCard | null;
   igpu: Gpu | null;
+  motherboard: Motherboard | null;
+  ram_kit: RamKit | null;
+  psu: Psu | null;
+  pc_case: PcCase | null;
+  cooler: Cooler | null;
+  wifi_card: WifiCard | null;
   storage_drives: StorageDrive[];
   benchmarks: Benchmark[];
 }
