@@ -14,6 +14,7 @@ import { PartsCatalogView } from './components/PartsCatalogView';
 import { SteamCompatibilityView } from './components/SteamCompatibilityView';
 import { useAuth } from './hooks/useAuth';
 import { useInventory } from './hooks/useInventory';
+import { computeFleetRankings } from './lib/scoring';
 import type {
   AppTab,
   Benchmark,
@@ -97,6 +98,11 @@ export function App() {
     [inventory.computers, selectedRigId],
   );
 
+  const fleetStandings = useMemo(
+    () => computeFleetRankings(inventory.computers),
+    [inventory.computers],
+  );
+
   const handleDeleteRig = async (rig: ComputerWithRelations) => {
     if (!window.confirm(`Delete "${rig.name}" (${rig.device_type})?`)) return;
     await inventory.deleteComputer(rig.id);
@@ -165,6 +171,7 @@ export function App() {
             {activeTab === 'inventory' ? (
               <InventoryView
                 computers={inventory.computers}
+                fleetStandings={fleetStandings}
                 onSelectComputer={(rig) => setSelectedRigId(rig.id)}
               />
             ) : null}
@@ -172,6 +179,7 @@ export function App() {
             {activeTab === 'compare' ? (
               <ComparisonMatrixView
                 computers={inventory.computers}
+                fleetStandings={fleetStandings}
                 onSelectComputer={(rig) => setSelectedRigId(rig.id)}
               />
             ) : null}
@@ -253,11 +261,13 @@ export function App() {
       <AiExportModal
         open={aiExportOpen}
         computers={inventory.computers}
+        fleetStandings={fleetStandings}
         onClose={() => setAiExportOpen(false)}
       />
 
       <ComputerDetailModal
         rig={selectedRig}
+        standing={selectedRig ? (fleetStandings.get(selectedRig.id) ?? null) : null}
         isOwner={auth.isOwner}
         onClose={() => setSelectedRigId(null)}
         onEdit={(rig) => {
@@ -288,6 +298,7 @@ export function App() {
       <ComputerFormModal
         open={rigFormOpen}
         editingRig={editingRig}
+        computers={inventory.computers}
         cpus={inventory.cpus}
         gpus={inventory.gpus}
         onClose={() => setRigFormOpen(false)}

@@ -1,5 +1,11 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Plus, Trash2, X } from 'lucide-react';
+import {
+  computeFleetRankings,
+  formatPassMark,
+  formatRankBadge,
+  getCompositeTooltip,
+} from '../lib/scoring';
 import type {
   BuildStatus,
   ComputerWithRelations,
@@ -13,6 +19,7 @@ import { PartCombobox } from './PartCombobox';
 interface ComputerFormModalProps {
   open: boolean;
   editingRig: ComputerWithRelations | null;
+  computers: ComputerWithRelations[];
   cpus: Cpu[];
   gpus: Gpu[];
   onClose: () => void;
@@ -48,6 +55,7 @@ function floatOrNull(v: string): number | null {
 export function ComputerFormModal({
   open,
   editingRig,
+  computers,
   cpus,
   gpus,
   onClose,
@@ -61,7 +69,6 @@ export function ComputerFormModal({
   const [brand, setBrand] = useState('');
   const [model, setModel] = useState('');
   const [buildDate, setBuildDate] = useState('');
-  const [overallRank, setOverallRank] = useState('');
   const [notes, setNotes] = useState('');
 
   const [cpuId, setCpuId] = useState<number | null>(null);
@@ -110,7 +117,6 @@ export function ComputerFormModal({
       setBrand(editingRig.brand ?? '');
       setModel(editingRig.model ?? '');
       setBuildDate(editingRig.build_date ?? '');
-      setOverallRank(editingRig.overall_rank?.toString() ?? '');
       setNotes(editingRig.notes ?? '');
       setCpuId(editingRig.cpu_id);
       setCpuCount(editingRig.cpu_count.toString());
@@ -171,7 +177,6 @@ export function ComputerFormModal({
       setBrand('');
       setModel('');
       setBuildDate('');
-      setOverallRank('');
       setNotes('');
       setCpuId(null);
       setCpuCount('1');
@@ -226,6 +231,110 @@ export function ComputerFormModal({
     }
   }, [recentlyCreatedPart]);
 
+  const previewStanding = useMemo(() => {
+    const virtualId = editingRig?.id ?? -1;
+    const selectedCpu =
+      cpuId !== null ? (cpus.find((c) => c.id === cpuId) ?? null) : null;
+    const selectedGpu =
+      gpuId !== null ? (gpus.find((g) => g.id === gpuId) ?? null) : null;
+    const selectedIgpu =
+      igpuId !== null ? (gpus.find((g) => g.id === igpuId) ?? null) : null;
+    const parsedCpuCount = Math.max(1, intOrNull(cpuCount) ?? 1);
+
+    const virtualRig: ComputerWithRelations = {
+      id: virtualId,
+      name: name.trim() || 'Draft Rig',
+      device_type: deviceType,
+      brand: brand.trim() || null,
+      model: model.trim() || null,
+      build_date: buildDate.trim() || null,
+      overall_rank: editingRig?.overall_rank ?? null,
+      status,
+      notes: notes.trim() || null,
+      cpu_id: cpuId,
+      cpu_count: parsedCpuCount,
+      gpu_id: gpuId,
+      gpu_aib_manufacturer: gpuAibMfg.trim() || null,
+      gpu_aib_model: gpuAibModel.trim() || null,
+      igpu_id: igpuId,
+      motherboard_name: mbName.trim() || null,
+      motherboard_brand: mbBrand.trim() || null,
+      motherboard_launch: mbLaunch.trim() || null,
+      ram_gb: intOrNull(ramGb),
+      ram_speed_mhz: intOrNull(ramSpeed),
+      ram_type: ramType.trim() || null,
+      ram_pc_rating: ramPc.trim() || null,
+      psu_wattage: intOrNull(psuWattage),
+      psu_brand: psuBrand.trim() || null,
+      psu_has_8pin_cpu: null,
+      psu_has_6pin_pcie: null,
+      power_adapter_notes: powerAdapterNotes.trim() || null,
+      screen_size_inches: floatOrNull(screenSize),
+      screen_resolution: screenRes.trim() || null,
+      weight_lbs: floatOrNull(weightLbs),
+      wifi_brand: wifiBrand.trim() || null,
+      wifi_product: wifiProduct.trim() || null,
+      wifi_model: wifiModel.trim() || null,
+      wifi_codename: editingRig?.wifi_codename ?? null,
+      wifi_launch_date: editingRig?.wifi_launch_date ?? null,
+      wifi_antenna: editingRig?.wifi_antenna ?? null,
+      wifi_bands: editingRig?.wifi_bands ?? null,
+      wifi_max_speed: editingRig?.wifi_max_speed ?? null,
+      wifi_standard: wifiStandard.trim() || null,
+      bluetooth_version: bluetooth.trim() || null,
+      wifi_form_factor: editingRig?.wifi_form_factor ?? null,
+      created_at: editingRig?.created_at ?? '',
+      updated_at: editingRig?.updated_at ?? '',
+      cpu: selectedCpu,
+      gpu: selectedGpu,
+      igpu: selectedIgpu,
+      storage_drives: editingRig?.storage_drives ?? [],
+      benchmarks: editingRig?.benchmarks ?? [],
+    };
+
+    const fleet = editingRig
+      ? computers.map((c) => (c.id === editingRig.id ? virtualRig : c))
+      : [...computers, virtualRig];
+
+    return computeFleetRankings(fleet).get(virtualId) ?? null;
+  }, [
+    editingRig,
+    computers,
+    cpus,
+    gpus,
+    cpuId,
+    cpuCount,
+    gpuId,
+    igpuId,
+    name,
+    deviceType,
+    brand,
+    model,
+    buildDate,
+    status,
+    notes,
+    gpuAibMfg,
+    gpuAibModel,
+    mbName,
+    mbBrand,
+    mbLaunch,
+    ramGb,
+    ramSpeed,
+    ramType,
+    ramPc,
+    psuWattage,
+    psuBrand,
+    powerAdapterNotes,
+    screenSize,
+    screenRes,
+    weightLbs,
+    wifiBrand,
+    wifiProduct,
+    wifiModel,
+    wifiStandard,
+    bluetooth,
+  ]);
+
   if (!open) return null;
 
   const isLaptop = deviceType === 'Laptop';
@@ -247,7 +356,7 @@ export function ComputerFormModal({
           brand: brand.trim() || null,
           model: model.trim() || null,
           build_date: buildDate.trim() || null,
-          overall_rank: intOrNull(overallRank),
+          overall_rank: editingRig?.overall_rank ?? null,
           status,
           notes: notes.trim() || null,
           cpu_id: cpuId,
@@ -393,13 +502,36 @@ export function ComputerFormModal({
               />
             </div>
             <div>
-              <label className="mb-1 block text-slate-400">Overall Rank</label>
-              <input
-                type="number"
-                value={overallRank}
-                onChange={(e) => setOverallRank(e.target.value)}
-                className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-1.5 text-white"
-              />
+              <label className="mb-1 block text-slate-400">
+                Computed Fleet Rank
+              </label>
+              <div
+                title={
+                  previewStanding
+                    ? getCompositeTooltip(previewStanding)
+                    : undefined
+                }
+                className="flex min-h-[30px] items-center justify-between gap-2 rounded-lg border border-slate-800 bg-slate-950/70 px-3 py-1.5 font-mono text-xs text-slate-200"
+              >
+                {previewStanding?.overallRank ? (
+                  <>
+                    <span className="font-semibold text-cyan-300">
+                      {formatRankBadge(previewStanding.overallRank)}
+                      {previewStanding.classRank
+                        ? ` (#${previewStanding.classRank.rank} ${deviceType})`
+                        : ''}
+                    </span>
+                    <span className="text-slate-400">
+                      {formatPassMark(previewStanding.compositeScore)}
+                      {previewStanding.isPartial ? '*' : ''}
+                    </span>
+                  </>
+                ) : (
+                  <span className="font-sans text-slate-500">
+                    Select CPU/GPU
+                  </span>
+                )}
+              </div>
             </div>
           </div>
 

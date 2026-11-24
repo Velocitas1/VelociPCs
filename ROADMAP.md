@@ -18,7 +18,7 @@ Fastest everyday wins with minimal schema churn, establishing unified scoring, r
   - Add nullable `result_url` column to `public.benchmarks` (per-run links across Time Spy, Fire Strike, Sky Diver, Cloud Gate, and upgrade runs; zero RLS change).
   - Add a `3DMark Result URL` input with automatic suite detection from `3dmark.com/spy/`, `/fs/`, `/sd/`, and `/cg/` URLs in `src/components/BenchmarkModal.tsx`.
   - Add **Edit** support for existing benchmark runs in `src/components/ComputerDetailModal.tsx` so result URLs can be backfilled without re-entering scores, and make 3DMark score badges clickable across Inventory, Detail, and Compare views.
-- [ ] **Unified PassMark Scoring & Dynamic Fleet Rank:**
+- [x] **Unified PassMark Scoring & Dynamic Fleet Rank:**
   - Store stable absolute `passmark_score` (PassMark CPU Mark / G3D Mark, higher = better) and optional `score_updated_at` on `cpus` and `gpus` instead of drifting global ordinal ranks (resolving mismatched Desktop vs. Notebookcheck Laptop rank scales so cross-device comparisons stay accurate and scores do not go stale as new hardware launches).
   - Compute per-inventory **"Fleet Rank"** (`#1 of N`) dynamically in the UI from `passmark_score` (and 3DMark scores), keeping/deprecating the legacy `rank` column while migrating.
 - [ ] **Detailed Draggable & Sortable Compare View:**
@@ -77,7 +77,7 @@ Fields that were blank or placeholder values in the original spreadsheets (HWiNF
 - [ ] Add missing RAM specs for `VelociStein`, `VelociSchool`, `VelociPlexG`, and `HP Workstation xv8600`.
 - [ ] Add PSU specs for remaining desktops (only `SpiderTrap` had PSU data in CSV).
 - [ ] Log 3DMark runs (and result URLs) for laptops and remaining desktops.
-- [ ] Replace `3000`/`1000` placeholder ranks on newer laptops (`VelociG14-2024`, `VelociG14`) and backfill unified PassMark scores (`passmark_score`) across `cpus` and `gpus`.
+- [x] Replace `3000`/`1000` placeholder ranks on newer laptops (`VelociG14-2024`, `VelociG14`) and backfill unified PassMark scores (`passmark_score`) across `cpus` and `gpus`.
 
 ---
 

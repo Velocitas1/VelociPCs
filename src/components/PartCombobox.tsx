@@ -64,6 +64,9 @@ export function PartCombobox({
         p.cores ? `${p.cores}C/${p.threads ?? p.cores}T` : null,
         p.base_clock_ghz ? `${p.base_clock_ghz} GHz` : null,
         p.socket,
+        p.passmark_score !== null
+          ? `PM ${p.passmark_score.toLocaleString()}`
+          : null,
         p.is_mobile ? 'Mobile' : 'Desktop',
       ]
         .filter(Boolean)
@@ -73,6 +76,9 @@ export function PartCombobox({
     return [
       g.vram_gb !== null ? `${g.vram_gb} GB ${g.vram_type ?? ''}` : null,
       formatDirectX(g.directx_version, g.directx_feature_level),
+      g.passmark_score !== null
+        ? `G3D ${g.passmark_score.toLocaleString()}`
+        : null,
       g.is_mobile ? 'Mobile' : 'Desktop',
     ]
       .filter(Boolean)

@@ -1,6 +1,15 @@
 import type { ComputerWithRelations } from '../types/database';
 import { getLatestBenchmarksMap, getSafeThreeDMarkUrl } from './benchmarks';
 import { formatDirectX } from './directx';
+import {
+  computeFleetRankings,
+  DUAL_CPU_EXTRA_SOCKET_FACTOR,
+  formatPassMark,
+  formatRankBadge,
+  PASSMARK_CPU_WEIGHT,
+  PASSMARK_GPU_WEIGHT,
+  type RigFleetStanding,
+} from './scoring';
 
 export function getLatestScoresMap(
   rig: ComputerWithRelations,
@@ -12,17 +21,52 @@ export function getLatestScoresMap(
   return map;
 }
 
-export function buildAiExportJson(rigs: ComputerWithRelations[]): string {
+function sortRigsByFleetRank(
+  rigs: ComputerWithRelations[],
+  standings: Map<number, RigFleetStanding>,
+): ComputerWithRelations[] {
+  return [...rigs].sort((a, b) => {
+    const ra = standings.get(a.id)?.overallRank?.rank ?? null;
+    const rb = standings.get(b.id)?.overallRank?.rank ?? null;
+    if (ra !== null && rb !== null && ra !== rb) return ra - rb;
+    if (ra !== null && rb === null) return -1;
+    if (ra === null && rb !== null) return 1;
+    return a.name.localeCompare(b.name);
+  });
+}
+
+export function buildAiExportJson(
+  rigs: ComputerWithRelations[],
+  fleetStandings?: Map<number, RigFleetStanding>,
+): string {
+  const standings = fleetStandings ?? computeFleetRankings(rigs);
+  const orderedRigs = sortRigsByFleetRank(rigs, standings);
+
   const payload = {
     exported_at: new Date().toISOString(),
-    total_rigs: rigs.length,
-    desktops: rigs.filter((r) => r.device_type === 'Desktop').length,
-    laptops: rigs.filter((r) => r.device_type === 'Laptop').length,
-    rigs: rigs.map((r) => {
+    total_rigs: orderedRigs.length,
+    desktops: orderedRigs.filter((r) => r.device_type === 'Desktop').length,
+    laptops: orderedRigs.filter((r) => r.device_type === 'Laptop').length,
+    scoring_model: {
+      name: 'Unified PassMark Composite',
+      formula: `round(${PASSMARK_GPU_WEIGHT.toFixed(2)} * effective_gpu_g3d + ${PASSMARK_CPU_WEIGHT.toFixed(2)} * effective_cpu_mark)`,
+      dual_cpu_extra_socket_factor: DUAL_CPU_EXTRA_SOCKET_FACTOR,
+    },
+    rigs: orderedRigs.map((r) => {
       const totalStorageGb = r.storage_drives.reduce(
         (sum, d) => sum + (d.capacity_gb ?? 0),
         0,
       );
+      const standing = standings.get(r.id);
+      const benchmarkRanks = standing
+        ? Object.fromEntries(
+            Object.entries(standing.benchmarkRanks).map(([suite, pos]) => [
+              suite,
+              { rank: pos.rank, total: pos.total, is_tied: pos.isTied },
+            ]),
+          )
+        : {};
+
       return {
         name: r.name,
         device_type: r.device_type,
@@ -30,6 +74,22 @@ export function buildAiExportJson(rigs: ComputerWithRelations[]): string {
         brand: r.brand,
         model: r.model,
         build_date: r.build_date,
+        fleet_rank: standing
+          ? {
+              overall_rank: standing.overallRank?.rank ?? null,
+              overall_total: standing.overallRank?.total ?? null,
+              class_rank: standing.classRank?.rank ?? null,
+              class_total: standing.classRank?.total ?? null,
+              composite_passmark: standing.compositeScore,
+              is_partial: standing.isPartial,
+              cpu_rank: standing.cpuRank?.rank ?? null,
+              cpu_total: standing.cpuRank?.total ?? null,
+              gpu_rank: standing.gpuRank?.rank ?? null,
+              gpu_total: standing.gpuRank?.total ?? null,
+              gpu_source: standing.gpuSource,
+              benchmarks_3dmark_ranks: benchmarkRanks,
+            }
+          : null,
         cpu: r.cpu
           ? {
               name: r.cpu_count > 1 ? `${r.cpu_count}x ${r.cpu.name}` : r.cpu.name,
@@ -40,6 +100,9 @@ export function buildAiExportJson(rigs: ComputerWithRelations[]): string {
               total_threads: (r.cpu.threads ?? 0) * r.cpu_count || null,
               base_ghz: r.cpu.base_clock_ghz,
               turbo_ghz: r.cpu.turbo_clock_ghz,
+              passmark_score: r.cpu.passmark_score,
+              effective_passmark_score: standing?.effectiveCpuScore ?? null,
+              score_updated_at: r.cpu.score_updated_at,
               spec_url: r.cpu.spec_url,
             }
           : null,
@@ -54,7 +117,17 @@ export function buildAiExportJson(rigs: ComputerWithRelations[]): string {
               directx: formatDirectX(r.gpu.directx_version, r.gpu.directx_feature_level),
               directx_version: r.gpu.directx_version,
               directx_feature_level: r.gpu.directx_feature_level,
+              passmark_score: r.gpu.passmark_score,
+              score_updated_at: r.gpu.score_updated_at,
               spec_url: r.gpu.spec_url,
+            }
+          : null,
+        igpu: r.igpu
+          ? {
+              name: r.igpu.name,
+              brand: r.igpu.brand,
+              passmark_score: r.igpu.passmark_score,
+              spec_url: r.igpu.spec_url,
             }
           : null,
         ram: r.ram_gb
@@ -95,33 +168,51 @@ export function buildAiExportJson(rigs: ComputerWithRelations[]): string {
   return JSON.stringify(payload, null, 2);
 }
 
-export function buildAiExportMarkdown(rigs: ComputerWithRelations[]): string {
-  const desktops = rigs.filter((r) => r.device_type === 'Desktop');
-  const laptops = rigs.filter((r) => r.device_type === 'Laptop');
+export function buildAiExportMarkdown(
+  rigs: ComputerWithRelations[],
+  fleetStandings?: Map<number, RigFleetStanding>,
+): string {
+  const standings = fleetStandings ?? computeFleetRankings(rigs);
+  const orderedRigs = sortRigsByFleetRank(rigs, standings);
+  const desktops = orderedRigs.filter((r) => r.device_type === 'Desktop');
+  const laptops = orderedRigs.filter((r) => r.device_type === 'Laptop');
 
   const lines: string[] = [
     '# VelociPCs Hardware Inventory Summary',
     '',
     `- **Exported:** ${new Date().toISOString().slice(0, 10)}`,
-    `- **Total Machines:** ${rigs.length} (${desktops.length} Desktops, ${laptops.length} Laptops)`,
+    `- **Total Machines:** ${orderedRigs.length} (${desktops.length} Desktops, ${laptops.length} Laptops)`,
+    `- **Unified Scoring Model:** PassMark Composite = round(60% GPU G3D + 40% CPU Mark; dual-CPU scaled 1.8x)`,
     '',
     '## Quick Comparison Table',
     '',
-    '| Name | Type | CPU | GPU | DirectX | RAM | Storage | 3DMark (Time Spy / Fire Strike / Cloud Gate) |',
-    '| --- | --- | --- | --- | --- | --- | --- | --- |',
+    '| Fleet Rank | Name | Type | CPU | GPU | PassMark (CPU / GPU) | DirectX | RAM | Storage | 3DMark (Time Spy / Fire Strike / Cloud Gate) |',
+    '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |',
   ];
 
-  for (const r of rigs) {
+  for (const r of orderedRigs) {
+    const standing = standings.get(r.id);
+    const fleetLabel = standing?.overallRank
+      ? `${formatRankBadge(standing.overallRank)} (${formatPassMark(standing.compositeScore)}${
+          standing.isPartial ? '*' : ''
+        })`
+      : '—';
     const cpuLabel = r.cpu
       ? `${r.cpu_count > 1 ? `${r.cpu_count}x ` : ''}${r.cpu.name} (${
           (r.cpu.cores ?? 0) * r.cpu_count
         }C/${(r.cpu.threads ?? 0) * r.cpu_count}T)`
       : '—';
+    const effectiveGpu = r.gpu ?? r.igpu;
     const gpuLabel = r.gpu
       ? `${r.gpu.name}${r.gpu.vram_gb ? ` (${r.gpu.vram_gb}GB)` : ''}`
-      : 'Integrated / None';
-    const dxLabel = r.gpu
-      ? formatDirectX(r.gpu.directx_version, r.gpu.directx_feature_level)
+      : r.igpu
+        ? `iGPU: ${r.igpu.name}`
+        : 'Integrated / None';
+    const pmPair = `${formatPassMark(standing?.effectiveCpuScore)} / ${formatPassMark(
+      standing?.effectiveGpuScore,
+    )}`;
+    const dxLabel = effectiveGpu
+      ? formatDirectX(effectiveGpu.directx_version, effectiveGpu.directx_feature_level)
       : 'N/A';
     const ramLabel = r.ram_gb
       ? `${r.ram_gb}GB${r.ram_speed_mhz ? ` @ ${r.ram_speed_mhz}MHz` : ''}`
@@ -146,7 +237,7 @@ export function buildAiExportMarkdown(rigs: ComputerWithRelations[]): string {
     const scoreStr = scoreParts.length ? scoreParts.join(' / ') : '—';
 
     lines.push(
-      `| ${r.name} | ${r.device_type} | ${cpuLabel} | ${gpuLabel} | ${dxLabel} | ${ramLabel} | ${storageLabel} | ${scoreStr} |`,
+      `| ${fleetLabel} | ${r.name} | ${r.device_type} | ${cpuLabel} | ${gpuLabel} | ${pmPair} | ${dxLabel} | ${ramLabel} | ${storageLabel} | ${scoreStr} |`,
     );
   }
 
@@ -154,7 +245,19 @@ export function buildAiExportMarkdown(rigs: ComputerWithRelations[]): string {
     if (group.length === 0) return;
     lines.push('', `## ${title}`);
     for (const r of group) {
+      const standing = standings.get(r.id);
       lines.push('', `### ${r.name} (${r.status})`);
+      if (standing?.overallRank) {
+        const classNote = standing.classRank
+          ? ` · #${standing.classRank.rank} of ${standing.classRank.total} ${r.device_type}s`
+          : '';
+        const partialNote = standing.isPartial ? ' · Partial (missing GPU/CPU PassMark)' : '';
+        lines.push(
+          `- **Fleet Rank:** ${formatRankBadge(standing.overallRank)}${classNote} — Composite PassMark ${formatPassMark(
+            standing.compositeScore,
+          )}${partialNote}`,
+        );
+      }
       if (r.brand || r.model) {
         lines.push(`- **System:** ${[r.brand, r.model].filter(Boolean).join(' ')}`);
       }
@@ -165,20 +268,46 @@ export function buildAiExportMarkdown(rigs: ComputerWithRelations[]): string {
       }
       if (r.cpu) {
         const cpuText = `${r.cpu_count > 1 ? `${r.cpu_count}x ` : ''}${r.cpu.brand} ${r.cpu.name}`;
+        const pmNote =
+          standing?.effectiveCpuScore !== null &&
+          standing?.effectiveCpuScore !== undefined
+            ? ` · PassMark CPU Mark ${formatPassMark(standing.effectiveCpuScore)}${
+                standing.cpuRank ? ` (${formatRankBadge(standing.cpuRank)})` : ''
+              }`
+            : '';
         lines.push(
           `- **CPU:** ${cpuText} — ${(r.cpu.cores ?? 0) * r.cpu_count}C/${
             (r.cpu.threads ?? 0) * r.cpu_count
-          }T @ ${r.cpu.base_clock_ghz ?? '?'}–${r.cpu.turbo_clock_ghz ?? '?'} GHz${
+          }T @ ${r.cpu.base_clock_ghz ?? '?'}–${r.cpu.turbo_clock_ghz ?? '?'} GHz${pmNote}${
             r.cpu.spec_url ? ` ([Specs](${r.cpu.spec_url}))` : ''
           }`,
         );
       }
       if (r.gpu) {
+        const g3dNote =
+          r.gpu.passmark_score !== null
+            ? ` · PassMark G3D ${formatPassMark(r.gpu.passmark_score)}${
+                standing?.gpuRank && standing.gpuSource === 'gpu'
+                  ? ` (${formatRankBadge(standing.gpuRank)})`
+                  : ''
+              }`
+            : '';
         lines.push(
           `- **GPU:** ${r.gpu.brand} ${r.gpu.name} (${r.gpu.vram_gb ?? '?'} GB ${
             r.gpu.vram_type ?? ''
-          }) — **${formatDirectX(r.gpu.directx_version, r.gpu.directx_feature_level)}**${
+          }) — **${formatDirectX(r.gpu.directx_version, r.gpu.directx_feature_level)}**${g3dNote}${
             r.gpu.spec_url ? ` ([Specs](${r.gpu.spec_url}))` : ''
+          }`,
+        );
+      }
+      if (r.igpu) {
+        const igpuG3d =
+          r.igpu.passmark_score !== null
+            ? ` · PassMark G3D ${formatPassMark(r.igpu.passmark_score)}`
+            : '';
+        lines.push(
+          `- **Integrated GPU:** ${r.igpu.brand} ${r.igpu.name}${igpuG3d}${
+            r.igpu.spec_url ? ` ([Specs](${r.igpu.spec_url}))` : ''
           }`,
         );
       }

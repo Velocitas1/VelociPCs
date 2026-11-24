@@ -10,6 +10,14 @@ import {
 } from 'lucide-react';
 import { getLatestBenchmarksMap, getSafeThreeDMarkUrl } from '../lib/benchmarks';
 import { getDirectXTierRank } from '../lib/directx';
+import {
+  formatPassMark,
+  formatRankBadge,
+  formatShortRank,
+  getCompositeTooltip,
+  getRankBadgeClasses,
+  type RigFleetStanding,
+} from '../lib/scoring';
 import type {
   Benchmark,
   ComputerWithRelations,
@@ -46,16 +54,20 @@ function MatrixScoreCell({
 
 interface ComparisonMatrixViewProps {
   computers: ComputerWithRelations[];
+  fleetStandings: Map<number, RigFleetStanding>;
   onSelectComputer: (rig: ComputerWithRelations) => void;
 }
 
 type SortKey =
+  | 'fleet_rank'
   | 'name'
   | 'device_type'
   | 'cpu'
   | 'cores'
+  | 'cpu_passmark'
   | 'gpu'
   | 'vram'
+  | 'gpu_passmark'
   | 'directx'
   | 'ram'
   | 'storage'
@@ -67,12 +79,13 @@ type SortKey =
 
 export function ComparisonMatrixView({
   computers,
+  fleetStandings,
   onSelectComputer,
 }: ComparisonMatrixViewProps) {
   const [typeFilter, setTypeFilter] = useState<'All' | DeviceType>('All');
   const [search, setSearch] = useState('');
-  const [sortKey, setSortKey] = useState<SortKey>('time_spy');
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  const [sortKey, setSortKey] = useState<SortKey>('fleet_rank');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [pinnedIds, setPinnedIds] = useState<number[]>([]);
 
   const handleSort = (key: SortKey) => {
@@ -80,7 +93,11 @@ export function ComparisonMatrixView({
       setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
     } else {
       setSortKey(key);
-      setSortDir(key === 'name' || key === 'device_type' ? 'asc' : 'desc');
+      setSortDir(
+        key === 'name' || key === 'device_type' || key === 'fleet_rank'
+          ? 'asc'
+          : 'desc',
+      );
     }
   };
 
@@ -102,13 +119,26 @@ export function ComparisonMatrixView({
         .includes(q);
     });
 
+    const getNullableScore = (
+      c: ComputerWithRelations,
+      key: 'fleet_rank' | 'cpu_passmark' | 'gpu_passmark',
+    ): number | null => {
+      const standing = fleetStandings.get(c.id);
+      if (key === 'fleet_rank') return standing?.overallRank?.rank ?? null;
+      if (key === 'cpu_passmark') return standing?.effectiveCpuScore ?? null;
+      return standing?.effectiveGpuScore ?? null;
+    };
+
     const getVal = (c: ComputerWithRelations, key: SortKey): string | number => {
       const benchmarks = getLatestBenchmarksMap(c);
       const totalStorage = c.storage_drives.reduce(
         (sum, d) => sum + (d.capacity_gb ?? 0),
         0,
       );
+      const effectiveGpu = c.gpu ?? c.igpu;
       switch (key) {
+        case 'fleet_rank':
+          return fleetStandings.get(c.id)?.overallRank?.rank ?? Number.MAX_SAFE_INTEGER;
         case 'name':
           return c.name.toLowerCase();
         case 'device_type':
@@ -117,14 +147,18 @@ export function ComparisonMatrixView({
           return (c.cpu?.name ?? '').toLowerCase();
         case 'cores':
           return (c.cpu?.cores ?? 0) * c.cpu_count;
+        case 'cpu_passmark':
+          return fleetStandings.get(c.id)?.effectiveCpuScore ?? -1;
         case 'gpu':
-          return (c.gpu?.name ?? '').toLowerCase();
+          return (effectiveGpu?.name ?? '').toLowerCase();
         case 'vram':
-          return c.gpu?.vram_gb ?? -1;
+          return effectiveGpu?.vram_gb ?? -1;
+        case 'gpu_passmark':
+          return fleetStandings.get(c.id)?.effectiveGpuScore ?? -1;
         case 'directx':
           return getDirectXTierRank(
-            c.gpu?.directx_version,
-            c.gpu?.directx_feature_level,
+            effectiveGpu?.directx_version,
+            effectiveGpu?.directx_feature_level,
           );
         case 'ram':
           return c.ram_gb ?? -1;
@@ -144,16 +178,33 @@ export function ComparisonMatrixView({
     };
 
     return [...filtered].sort((a, b) => {
+      if (
+        sortKey === 'fleet_rank' ||
+        sortKey === 'cpu_passmark' ||
+        sortKey === 'gpu_passmark'
+      ) {
+        const av = getNullableScore(a, sortKey);
+        const bv = getNullableScore(b, sortKey);
+        if (av !== null && bv !== null) {
+          const cmp = sortDir === 'asc' ? av - bv : bv - av;
+          return cmp !== 0 ? cmp : a.name.localeCompare(b.name);
+        }
+        if (av !== null) return -1;
+        if (bv !== null) return 1;
+        return a.name.localeCompare(b.name);
+      }
+
       const av = getVal(a, sortKey);
       const bv = getVal(b, sortKey);
       if (typeof av === 'number' && typeof bv === 'number') {
-        return sortDir === 'asc' ? av - bv : bv - av;
+        const cmp = sortDir === 'asc' ? av - bv : bv - av;
+        return cmp !== 0 ? cmp : a.name.localeCompare(b.name);
       }
       return sortDir === 'asc'
         ? String(av).localeCompare(String(bv))
         : String(bv).localeCompare(String(av));
     });
-  }, [computers, typeFilter, search, sortKey, sortDir]);
+  }, [computers, fleetStandings, typeFilter, search, sortKey, sortDir]);
 
   const pinnedRigs = useMemo(
     () =>
@@ -272,6 +323,45 @@ export function ComparisonMatrixView({
               </thead>
               <tbody className="divide-y divide-slate-800/70">
                 <tr>
+                  <td className="py-2 pr-4 text-slate-400">Fleet Rank</td>
+                  {pinnedRigs.map((r) => {
+                    const standing = fleetStandings.get(r.id);
+                    return (
+                      <td key={r.id} className="px-3 py-2 font-mono">
+                        {standing?.overallRank ? (
+                          <div
+                            title={getCompositeTooltip(standing)}
+                            className="flex flex-wrap items-center gap-1.5"
+                          >
+                            <span
+                              className={`rounded border px-1.5 py-0.5 text-[11px] font-semibold ${getRankBadgeClasses(
+                                standing.overallRank,
+                              )}`}
+                            >
+                              {formatRankBadge(standing.overallRank)}
+                            </span>
+                            <span className="text-slate-200">
+                              · {formatPassMark(standing.compositeScore)}
+                            </span>
+                            {standing.classRank ? (
+                              <span className="text-[11px] text-slate-400">
+                                (#{standing.classRank.rank} {r.device_type})
+                              </span>
+                            ) : null}
+                            {standing.isPartial ? (
+                              <span className="text-[11px] text-amber-300">
+                                Partial
+                              </span>
+                            ) : null}
+                          </div>
+                        ) : (
+                          <span className="text-slate-500">—</span>
+                        )}
+                      </td>
+                    );
+                  })}
+                </tr>
+                <tr>
                   <td className="py-2 pr-4 text-slate-400">CPU</td>
                   {pinnedRigs.map((r) => (
                     <td key={r.id} className="px-3 py-2">
@@ -336,6 +426,39 @@ export function ComparisonMatrixView({
                       · {r.ram_gb ? `${r.ram_gb} GB RAM` : '— RAM'}
                     </td>
                   ))}
+                </tr>
+                <tr>
+                  <td className="py-2 pr-4 text-slate-400">
+                    PassMark (CPU / GPU)
+                  </td>
+                  {pinnedRigs.map((r) => {
+                    const standing = fleetStandings.get(r.id);
+                    const cpuStr =
+                      standing?.effectiveCpuScore !== null &&
+                      standing?.effectiveCpuScore !== undefined
+                        ? `CPU ${formatPassMark(standing.effectiveCpuScore)}${
+                            standing.cpuRank
+                              ? ` (${formatShortRank(standing.cpuRank)})`
+                              : ''
+                          }`
+                        : 'CPU —';
+                    const gpuStr =
+                      standing?.effectiveGpuScore !== null &&
+                      standing?.effectiveGpuScore !== undefined
+                        ? `GPU ${formatPassMark(standing.effectiveGpuScore)}${
+                            standing.gpuSource === 'igpu' ? ' iGPU' : ''
+                          }${
+                            standing.gpuRank
+                              ? ` (${formatShortRank(standing.gpuRank)})`
+                              : ''
+                          }`
+                        : 'GPU —';
+                    return (
+                      <td key={r.id} className="px-3 py-2 font-mono text-cyan-200">
+                        {cpuStr} · {gpuStr}
+                      </td>
+                    );
+                  })}
                 </tr>
                 <tr>
                   <td className="py-2 pr-4 text-slate-400">
@@ -408,12 +531,15 @@ export function ComparisonMatrixView({
           <thead className="border-b border-slate-800 bg-slate-950/80">
             <tr>
               <th className="px-3 py-2.5 text-center text-slate-500">Pin</th>
+              <SortHeader label="Fleet" colKey="fleet_rank" />
               <SortHeader label="Rig" colKey="name" />
               <SortHeader label="Type" colKey="device_type" />
               <SortHeader label="CPU" colKey="cpu" />
               <SortHeader label="C/T" colKey="cores" align="right" />
+              <SortHeader label="CPU Mark" colKey="cpu_passmark" align="right" />
               <SortHeader label="GPU" colKey="gpu" />
               <SortHeader label="VRAM" colKey="vram" align="right" />
+              <SortHeader label="GPU Mark" colKey="gpu_passmark" align="right" />
               <SortHeader label="DirectX" colKey="directx" />
               <SortHeader label="RAM" colKey="ram" align="right" />
               <SortHeader label="Storage" colKey="storage" align="right" />
@@ -426,6 +552,7 @@ export function ComparisonMatrixView({
           <tbody className="divide-y divide-slate-800/70">
             {rows.map((rig) => {
               const benchmarks = getLatestBenchmarksMap(rig);
+              const standing = fleetStandings.get(rig.id);
               const totalStorage = rig.storage_drives.reduce(
                 (sum, d) => sum + (d.capacity_gb ?? 0),
                 0,
@@ -447,6 +574,23 @@ export function ComparisonMatrixView({
                       aria-label={`Select ${rig.name} for comparison`}
                       className="rounded border-slate-600 bg-slate-950 text-cyan-500"
                     />
+                  </td>
+                  <td className="px-3 py-2.5 font-mono whitespace-nowrap">
+                    {standing?.overallRank ? (
+                      <span
+                        title={getCompositeTooltip(standing)}
+                        className={`inline-flex items-center gap-0.5 rounded border px-1.5 py-0.5 text-[11px] font-semibold ${getRankBadgeClasses(
+                          standing.overallRank,
+                        )}`}
+                      >
+                        {formatShortRank(standing.overallRank)}
+                        {standing.isPartial ? (
+                          <span className="text-amber-300">*</span>
+                        ) : null}
+                      </span>
+                    ) : (
+                      <span className="text-slate-600">—</span>
+                    )}
                   </td>
                   <td className="px-3 py-2.5 font-semibold whitespace-nowrap">
                     <button
@@ -486,20 +630,64 @@ export function ComparisonMatrixView({
                         }`
                       : '—'}
                   </td>
+                  <td
+                    title={
+                      standing?.cpuMultiplier && standing.cpuMultiplier > 1 && rig.cpu?.passmark_score
+                        ? `${formatPassMark(rig.cpu.passmark_score)} × ${standing.cpuMultiplier} (${rig.cpu_count} sockets)`
+                        : undefined
+                    }
+                    className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-cyan-200"
+                  >
+                    {standing?.effectiveCpuScore !== null &&
+                    standing?.effectiveCpuScore !== undefined ? (
+                      <>
+                        {formatPassMark(standing.effectiveCpuScore)}
+                        {standing.cpuMultiplier > 1 ? (
+                          <span className="ml-1 text-[10px] text-slate-400">
+                            ×{standing.cpuMultiplier}
+                          </span>
+                        ) : null}
+                      </>
+                    ) : (
+                      <span className="text-slate-600">—</span>
+                    )}
+                  </td>
                   <td className="px-3 py-2.5 whitespace-nowrap">
                     {rig.gpu ? (
                       <SpecLink
                         label={`${rig.gpu.brand} ${rig.gpu.name}`}
                         specUrl={rig.gpu.spec_url}
                       />
+                    ) : rig.igpu ? (
+                      <SpecLink
+                        label={`${rig.igpu.brand} ${rig.igpu.name}`}
+                        prefix="iGPU"
+                        specUrl={rig.igpu.spec_url}
+                      />
                     ) : (
                       <span className="text-slate-500">—</span>
                     )}
                   </td>
                   <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-slate-300">
-                    {rig.gpu?.vram_gb !== null && rig.gpu?.vram_gb !== undefined
-                      ? `${rig.gpu.vram_gb} GB`
+                    {(rig.gpu ?? rig.igpu)?.vram_gb !== null &&
+                    (rig.gpu ?? rig.igpu)?.vram_gb !== undefined
+                      ? `${(rig.gpu ?? rig.igpu)?.vram_gb} GB`
                       : '—'}
+                  </td>
+                  <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-emerald-200">
+                    {standing?.effectiveGpuScore !== null &&
+                    standing?.effectiveGpuScore !== undefined ? (
+                      <>
+                        {formatPassMark(standing.effectiveGpuScore)}
+                        {standing.gpuSource === 'igpu' ? (
+                          <span className="ml-1 text-[10px] text-slate-400">
+                            iGPU
+                          </span>
+                        ) : null}
+                      </>
+                    ) : (
+                      <span className="text-slate-600">—</span>
+                    )}
                   </td>
                   <td className="px-3 py-2.5 whitespace-nowrap">
                     <DirectXBadge

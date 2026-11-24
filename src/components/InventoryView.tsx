@@ -12,24 +12,41 @@ import {
 } from 'lucide-react';
 import { getLatestBenchmarksMap, getSafeThreeDMarkUrl } from '../lib/benchmarks';
 import { getDirectXTierRank } from '../lib/directx';
+import {
+  formatPassMark,
+  formatRankBadge,
+  getCompositeTooltip,
+  getRankBadgeClasses,
+  type RigFleetStanding,
+} from '../lib/scoring';
 import type { ComputerWithRelations, DeviceType } from '../types/database';
 import { DirectXBadge } from './DirectXBadge';
 import { SpecLink } from './SpecLink';
 
 interface InventoryViewProps {
   computers: ComputerWithRelations[];
+  fleetStandings: Map<number, RigFleetStanding>;
   onSelectComputer: (rig: ComputerWithRelations) => void;
 }
 
 type DxFilter = 'all' | 'dx12_ult' | 'dx12' | 'dx11' | 'legacy';
+type InventorySortKey =
+  | 'fleet_rank'
+  | 'cpu_passmark'
+  | 'gpu_passmark'
+  | 'directx'
+  | 'name'
+  | 'build_year';
 
 export function InventoryView({
   computers,
+  fleetStandings,
   onSelectComputer,
 }: InventoryViewProps) {
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState<'All' | DeviceType>('All');
   const [dxFilter, setDxFilter] = useState<DxFilter>('all');
+  const [sortKey, setSortKey] = useState<InventorySortKey>('fleet_rank');
 
   const stats = useMemo(() => {
     const desktops = computers.filter((c) => c.device_type === 'Desktop').length;
@@ -73,12 +90,13 @@ export function InventoryView({
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return computers.filter((c) => {
+    const matches = computers.filter((c) => {
       if (typeFilter !== 'All' && c.device_type !== typeFilter) return false;
 
+      const effectiveDxGpu = c.gpu ?? c.igpu;
       const dxRank = getDirectXTierRank(
-        c.gpu?.directx_version,
-        c.gpu?.directx_feature_level,
+        effectiveDxGpu?.directx_version,
+        effectiveDxGpu?.directx_feature_level,
       );
       if (dxFilter === 'dx12_ult' && dxRank < 1220) return false;
       if (dxFilter === 'dx12' && dxRank < 1180) return false;
@@ -97,6 +115,8 @@ export function InventoryView({
         c.cpu?.name,
         c.gpu?.brand,
         c.gpu?.name,
+        c.igpu?.brand,
+        c.igpu?.name,
         c.gpu_aib_manufacturer,
         c.gpu_aib_model,
       ]
@@ -105,7 +125,73 @@ export function InventoryView({
         .toLowerCase();
       return haystack.includes(q);
     });
-  }, [computers, search, typeFilter, dxFilter]);
+
+    const compareNullsLastDesc = (
+      av: number | null | undefined,
+      bv: number | null | undefined,
+    ): number => {
+      if (av != null && bv != null) return bv - av;
+      if (av != null) return -1;
+      if (bv != null) return 1;
+      return 0;
+    };
+
+    return [...matches].sort((a, b) => {
+      const sa = fleetStandings.get(a.id);
+      const sb = fleetStandings.get(b.id);
+
+      if (sortKey === 'fleet_rank') {
+        const ra = sa?.overallRank?.rank ?? null;
+        const rb = sb?.overallRank?.rank ?? null;
+        if (ra !== null && rb !== null && ra !== rb) return ra - rb;
+        if (ra !== null && rb === null) return -1;
+        if (ra === null && rb !== null) return 1;
+        return a.name.localeCompare(b.name);
+      }
+      if (sortKey === 'cpu_passmark') {
+        const diff = compareNullsLastDesc(
+          sa?.effectiveCpuScore,
+          sb?.effectiveCpuScore,
+        );
+        return diff !== 0 ? diff : a.name.localeCompare(b.name);
+      }
+      if (sortKey === 'gpu_passmark') {
+        const diff = compareNullsLastDesc(
+          sa?.effectiveGpuScore,
+          sb?.effectiveGpuScore,
+        );
+        return diff !== 0 ? diff : a.name.localeCompare(b.name);
+      }
+      if (sortKey === 'directx') {
+        const dxA = getDirectXTierRank(
+          (a.gpu ?? a.igpu)?.directx_version,
+          (a.gpu ?? a.igpu)?.directx_feature_level,
+        );
+        const dxB = getDirectXTierRank(
+          (b.gpu ?? b.igpu)?.directx_version,
+          (b.gpu ?? b.igpu)?.directx_feature_level,
+        );
+        if (dxA !== dxB) return dxB - dxA;
+        const compDiff = compareNullsLastDesc(
+          sa?.compositeScore,
+          sb?.compositeScore,
+        );
+        return compDiff !== 0 ? compDiff : a.name.localeCompare(b.name);
+      }
+      if (sortKey === 'build_year') {
+        if (a.build_date && b.build_date) {
+          const cmp = b.build_date.localeCompare(a.build_date);
+          if (cmp !== 0) return cmp;
+        } else if (a.build_date) {
+          return -1;
+        } else if (b.build_date) {
+          return 1;
+        }
+        return a.name.localeCompare(b.name);
+      }
+      return a.name.localeCompare(b.name);
+    });
+  }, [computers, fleetStandings, search, typeFilter, dxFilter, sortKey]);
 
   return (
     <div className="space-y-6">
@@ -213,6 +299,20 @@ export function InventoryView({
             <option value="dx11">DX 11 Era Only</option>
             <option value="legacy">DX 10 &amp; Older</option>
           </select>
+
+          <select
+            value={sortKey}
+            onChange={(e) => setSortKey(e.target.value as InventorySortKey)}
+            aria-label="Sort inventory rigs"
+            className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-1.5 text-xs text-slate-200 focus:border-cyan-400 focus:outline-none"
+          >
+            <option value="fleet_rank">Sort: Fleet Rank</option>
+            <option value="cpu_passmark">Sort: CPU PassMark</option>
+            <option value="gpu_passmark">Sort: GPU PassMark</option>
+            <option value="directx">Sort: DirectX Tier</option>
+            <option value="name">Sort: Name (A–Z)</option>
+            <option value="build_year">Sort: Build Year</option>
+          </select>
         </div>
       </div>
 
@@ -230,6 +330,7 @@ export function InventoryView({
             );
             const latestBenchmarks = getLatestBenchmarksMap(rig);
             const isLaptop = rig.device_type === 'Laptop';
+            const standing = fleetStandings.get(rig.id);
 
             return (
               <article
@@ -239,7 +340,7 @@ export function InventoryView({
               >
                 <div className="flex items-start justify-between gap-2">
                   <div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-1.5">
                       <span
                         className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-semibold ${
                           isLaptop
@@ -254,6 +355,24 @@ export function InventoryView({
                         )}
                         {rig.device_type}
                       </span>
+                      {standing?.overallRank ? (
+                        <span
+                          title={getCompositeTooltip(standing)}
+                          className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 font-mono text-[11px] font-semibold ${getRankBadgeClasses(
+                            standing.overallRank,
+                          )}`}
+                        >
+                          {formatRankBadge(standing.overallRank)}
+                          {standing.isPartial ? (
+                            <span
+                              className="text-amber-300"
+                              aria-label="Partial score"
+                            >
+                              *
+                            </span>
+                          ) : null}
+                        </span>
+                      ) : null}
                       {rig.build_date ? (
                         <span className="font-mono text-[11px] text-slate-500">
                           {rig.build_date.slice(0, 4)}
@@ -304,6 +423,14 @@ export function InventoryView({
                           {rig.cpu.base_clock_ghz
                             ? ` · ${rig.cpu.base_clock_ghz} GHz`
                             : ''}
+                          {standing?.effectiveCpuScore !== null &&
+                          standing?.effectiveCpuScore !== undefined
+                            ? ` · PM ${formatPassMark(standing.effectiveCpuScore)}${
+                                rig.cpu_count > 1
+                                  ? ` (${rig.cpu_count}× est.)`
+                                  : ''
+                              }`
+                            : ''}
                         </p>
                       ) : null}
                     </div>
@@ -321,6 +448,13 @@ export function InventoryView({
                           specUrl={rig.gpu.spec_url}
                           stopPropagation
                         />
+                      ) : rig.igpu ? (
+                        <SpecLink
+                          label={`${rig.igpu.brand} ${rig.igpu.name}`}
+                          prefix="iGPU"
+                          specUrl={rig.igpu.spec_url}
+                          stopPropagation
+                        />
                       ) : (
                         <span className="text-slate-500">
                           Integrated / None
@@ -334,6 +468,14 @@ export function InventoryView({
                           {rig.gpu_aib_manufacturer
                             ? ` · ${rig.gpu_aib_manufacturer}`
                             : ''}
+                          {rig.gpu.passmark_score !== null
+                            ? ` · G3D ${formatPassMark(rig.gpu.passmark_score)}`
+                            : ''}
+                        </p>
+                      ) : rig.igpu?.passmark_score !== null &&
+                        rig.igpu?.passmark_score !== undefined ? (
+                        <p className="font-mono text-[11px] text-slate-500">
+                          G3D {formatPassMark(rig.igpu.passmark_score)}
                         </p>
                       ) : null}
                     </div>

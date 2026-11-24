@@ -25,7 +25,10 @@ export interface Cpu {
   memory_type: string | null;
   memory_speed_mhz: number | null;
   launch_date: string | null;
+  /** @deprecated Legacy ordinal rank preserved during PassMark migration */
   rank: number | null;
+  passmark_score: number | null;
+  score_updated_at: string | null;
   is_mobile: boolean;
   spec_url: string | null;
   created_at: string;
@@ -45,7 +48,10 @@ export interface Gpu {
   directx_version: string | null;
   directx_feature_level: string | null;
   category: string | null;
+  /** @deprecated Legacy ordinal rank preserved during PassMark migration */
   rank: number | null;
+  passmark_score: number | null;
+  score_updated_at: string | null;
   is_mobile: boolean;
   spec_url: string | null;
   created_at: string;
@@ -92,6 +98,7 @@ export interface Computer {
   brand: string | null;
   model: string | null;
   build_date: string | null;
+  /** @deprecated Legacy ordinal rank preserved during PassMark migration */
   overall_rank: number | null;
   status: BuildStatus;
   notes: string | null;

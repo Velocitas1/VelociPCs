@@ -13,13 +13,22 @@ import {
   X,
   Zap,
 } from 'lucide-react';
-import { getSafeThreeDMarkUrl } from '../lib/benchmarks';
+import { getLatestBenchmarksMap, getSafeThreeDMarkUrl } from '../lib/benchmarks';
+import {
+  formatPassMark,
+  formatRankBadge,
+  formatScoreUpdatedDate,
+  getCompositeTooltip,
+  getRankBadgeClasses,
+  type RigFleetStanding,
+} from '../lib/scoring';
 import type { Benchmark, ComputerWithRelations } from '../types/database';
 import { DirectXBadge } from './DirectXBadge';
 import { SpecLink } from './SpecLink';
 
 interface ComputerDetailModalProps {
   rig: ComputerWithRelations | null;
+  standing: RigFleetStanding | null;
   isOwner: boolean;
   onClose: () => void;
   onEdit: (rig: ComputerWithRelations) => void;
@@ -35,6 +44,7 @@ interface ComputerDetailModalProps {
 
 export function ComputerDetailModal({
   rig,
+  standing,
   isOwner,
   onClose,
   onEdit,
@@ -46,6 +56,7 @@ export function ComputerDetailModal({
   if (!rig) return null;
 
   const isLaptop = rig.device_type === 'Laptop';
+  const latestBySuite = getLatestBenchmarksMap(rig);
   const maxBySuite = new Map<string, number>();
   for (const b of rig.benchmarks) {
     maxBySuite.set(
@@ -82,6 +93,28 @@ export function ComputerDetailModal({
                 version={rig.gpu?.directx_version}
                 featureLevel={rig.gpu?.directx_feature_level}
               />
+              {standing?.overallRank ? (
+                <span
+                  title={getCompositeTooltip(standing)}
+                  className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 font-mono text-xs font-semibold ${getRankBadgeClasses(
+                    standing.overallRank,
+                  )}`}
+                >
+                  Fleet {formatRankBadge(standing.overallRank)}
+                </span>
+              ) : null}
+              {standing?.classRank ? (
+                <span className="rounded-md border border-slate-700 bg-slate-950 px-2 py-0.5 font-mono text-xs text-slate-300">
+                  #{standing.classRank.rank} {rig.device_type}
+                </span>
+              ) : null}
+              {standing?.isPartial ? (
+                <span className="rounded-md border border-amber-500/40 bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-300">
+                  {standing.effectiveGpuScore === null
+                    ? 'Partial (No GPU)'
+                    : 'Partial (No CPU)'}
+                </span>
+              ) : null}
             </div>
             <h2 className="mt-2 text-xl font-bold text-white">{rig.name}</h2>
             <p className="text-xs text-slate-400">
@@ -91,7 +124,10 @@ export function ComputerDetailModal({
                     .filter(Boolean)
                     .join(' ')}
               {rig.build_date ? ` · Built ${rig.build_date}` : ''}
-              {rig.overall_rank ? ` · Rank #${rig.overall_rank}` : ''}
+              {standing?.compositeScore !== null &&
+              standing?.compositeScore !== undefined
+                ? ` · Composite ${formatPassMark(standing.compositeScore)}`
+                : ''}
             </p>
           </div>
 
@@ -183,6 +219,46 @@ export function ComputerDetailModal({
                         {rig.cpu.launch_date ?? '—'}
                       </dd>
                     </div>
+                    <div className="col-span-2 border-t border-slate-800/80 pt-1.5">
+                      <dt className="text-slate-500">PassMark CPU Mark</dt>
+                      <dd
+                        title={
+                          formatScoreUpdatedDate(rig.cpu.score_updated_at)
+                            ? `Updated ${formatScoreUpdatedDate(rig.cpu.score_updated_at)}`
+                            : undefined
+                        }
+                        className="mt-0.5 flex flex-wrap items-center gap-2 font-mono"
+                      >
+                        <span className="font-semibold text-cyan-200">
+                          {standing?.effectiveCpuScore !== null &&
+                          standing?.effectiveCpuScore !== undefined
+                            ? `${formatPassMark(standing.effectiveCpuScore)}${
+                                rig.cpu_count > 1 ? ' est.' : ''
+                              }`
+                            : '—'}
+                        </span>
+                        {rig.cpu_count > 1 && rig.cpu.passmark_score !== null ? (
+                          <span className="text-[11px] text-slate-400">
+                            ({formatPassMark(rig.cpu.passmark_score)} ×{' '}
+                            {standing?.cpuMultiplier})
+                          </span>
+                        ) : null}
+                        {standing?.cpuRank ? (
+                          <span
+                            className={`rounded border px-1.5 py-0.5 text-[11px] ${getRankBadgeClasses(
+                              standing.cpuRank,
+                            )}`}
+                          >
+                            CPU {formatRankBadge(standing.cpuRank)}
+                          </span>
+                        ) : null}
+                        {formatScoreUpdatedDate(rig.cpu.score_updated_at) ? (
+                          <span className="text-[11px] text-slate-500">
+                            Updated {formatScoreUpdatedDate(rig.cpu.score_updated_at)}
+                          </span>
+                        ) : null}
+                      </dd>
+                    </div>
                   </dl>
                 </div>
               ) : (
@@ -237,28 +313,72 @@ export function ComputerDetailModal({
                       <dd>{rig.gpu.category ?? '—'}</dd>
                     </div>
                     <div>
-                      <dt className="text-slate-500">TDP / Rank</dt>
+                      <dt className="text-slate-500">TDP</dt>
                       <dd className="font-mono">
                         {rig.gpu.tdp_w ? `${rig.gpu.tdp_w}W` : '—'}
-                        {rig.gpu.rank ? ` · #${rig.gpu.rank}` : ''}
+                      </dd>
+                    </div>
+                    <div className="col-span-2 border-t border-slate-800/80 pt-1.5">
+                      <dt className="text-slate-500">PassMark G3D Mark</dt>
+                      <dd
+                        title={
+                          formatScoreUpdatedDate(rig.gpu.score_updated_at)
+                            ? `Updated ${formatScoreUpdatedDate(rig.gpu.score_updated_at)}`
+                            : undefined
+                        }
+                        className="mt-0.5 flex flex-wrap items-center gap-2 font-mono"
+                      >
+                        <span className="font-semibold text-emerald-200">
+                          {formatPassMark(rig.gpu.passmark_score)}
+                        </span>
+                        {standing?.gpuRank && standing.gpuSource === 'gpu' ? (
+                          <span
+                            className={`rounded border px-1.5 py-0.5 text-[11px] ${getRankBadgeClasses(
+                              standing.gpuRank,
+                            )}`}
+                          >
+                            GPU {formatRankBadge(standing.gpuRank)}
+                          </span>
+                        ) : null}
+                        {formatScoreUpdatedDate(rig.gpu.score_updated_at) ? (
+                          <span className="text-[11px] text-slate-500">
+                            Updated {formatScoreUpdatedDate(rig.gpu.score_updated_at)}
+                          </span>
+                        ) : null}
                       </dd>
                     </div>
                   </dl>
-                  {rig.igpu ? (
-                    <div className="border-t border-slate-800 pt-2 text-xs text-slate-400">
-                      Integrated GPU:{' '}
-                      <SpecLink
-                        label={`${rig.igpu.brand} ${rig.igpu.name}`}
-                        specUrl={rig.igpu.spec_url}
-                      />
-                    </div>
-                  ) : null}
                 </div>
               ) : (
                 <p className="text-xs text-slate-500">
                   No discrete graphics card recorded.
                 </p>
               )}
+              {rig.igpu ? (
+                <div className="mt-2.5 border-t border-slate-800 pt-2 text-xs text-slate-400">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span>
+                      Integrated GPU:{' '}
+                      <SpecLink
+                        label={`${rig.igpu.brand} ${rig.igpu.name}`}
+                        specUrl={rig.igpu.spec_url}
+                      />
+                    </span>
+                    <span className="flex items-center gap-1.5 font-mono text-[11px] text-slate-300">
+                      <span>G3D {formatPassMark(rig.igpu.passmark_score)}</span>
+                      {standing?.gpuRank && standing.gpuSource === 'igpu' ? (
+                        <span
+                          className={`rounded border px-1.5 py-0.5 ${getRankBadgeClasses(
+                            standing.gpuRank,
+                          )}`}
+                        >
+                          GPU {formatRankBadge(standing.gpuRank)}
+                        </span>
+                      ) : null}
+                    </span>
+                  </div>
+                </div>
+              ) : null}
             </section>
           </div>
 
@@ -427,12 +547,27 @@ export function ComputerDetailModal({
                       className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-800 bg-slate-900/70 px-3 py-2 text-xs"
                     >
                       <div className="min-w-[140px]">
-                        <span className="font-semibold text-white">
-                          {b.suite_name}
-                        </span>
-                        <span className="ml-2 font-mono text-[11px] text-slate-500">
-                          {b.recorded_at}
-                        </span>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="font-semibold text-white">
+                            {b.suite_name}
+                          </span>
+                          {latestBySuite[b.suite_name]?.id === b.id &&
+                          standing?.benchmarkRanks[b.suite_name] ? (
+                            <span
+                              className={`rounded border px-1.5 py-0.5 font-mono text-[10px] font-semibold ${getRankBadgeClasses(
+                                standing.benchmarkRanks[b.suite_name],
+                              )}`}
+                            >
+                              Fleet{' '}
+                              {formatRankBadge(
+                                standing.benchmarkRanks[b.suite_name],
+                              )}
+                            </span>
+                          ) : null}
+                          <span className="font-mono text-[11px] text-slate-500">
+                            {b.recorded_at}
+                          </span>
+                        </div>
                         {b.graphics_score !== null || b.cpu_score !== null ? (
                           <p className="mt-0.5 font-mono text-[11px] text-slate-400">
                             {[

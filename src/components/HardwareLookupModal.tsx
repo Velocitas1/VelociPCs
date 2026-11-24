@@ -1,5 +1,9 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { ExternalLink, Globe, Loader2, Search, Sparkles, X } from 'lucide-react';
+import {
+  buildPassMarkSearchUrl,
+  formatScoreUpdatedDate,
+} from '../lib/scoring';
 import { supabase } from '../lib/supabase';
 import type { Cpu, Gpu } from '../types/database';
 
@@ -30,6 +34,7 @@ interface LookupResultItem {
   directx_version?: string | null;
   directx_feature_level?: string | null;
   category?: string | null;
+  passmark_score?: number | null;
   summary?: string | null;
 }
 
@@ -83,7 +88,7 @@ export function HardwareLookupModal({
   const [isMobile, setIsMobile] = useState(false);
   const [tdpW, setTdpW] = useState('');
   const [processNm, setProcessNm] = useState('');
-  const [rank, setRank] = useState('');
+  const [passmarkScore, setPassmarkScore] = useState('');
 
   // CPU fields
   const [codename, setCodename] = useState('');
@@ -124,7 +129,7 @@ export function HardwareLookupModal({
       setIsMobile(editingCpu.is_mobile);
       setTdpW(editingCpu.tdp_w?.toString() ?? '');
       setProcessNm(editingCpu.process_nm?.toString() ?? '');
-      setRank(editingCpu.rank?.toString() ?? '');
+      setPassmarkScore(editingCpu.passmark_score?.toString() ?? '');
       setCodename(editingCpu.codename ?? '');
       setSocket(editingCpu.socket ?? '');
       setBaseGhz(editingCpu.base_clock_ghz?.toString() ?? '');
@@ -143,7 +148,7 @@ export function HardwareLookupModal({
       setIsMobile(editingGpu.is_mobile);
       setTdpW(editingGpu.tdp_w?.toString() ?? '');
       setProcessNm(editingGpu.process_nm?.toString() ?? '');
-      setRank(editingGpu.rank?.toString() ?? '');
+      setPassmarkScore(editingGpu.passmark_score?.toString() ?? '');
       setArchitecture(editingGpu.architecture ?? '');
       setVramGb(editingGpu.vram_gb?.toString() ?? '');
       setVramType(editingGpu.vram_type ?? '');
@@ -158,7 +163,7 @@ export function HardwareLookupModal({
       setIsMobile(false);
       setTdpW('');
       setProcessNm('');
-      setRank('');
+      setPassmarkScore('');
       setCodename('');
       setSocket('');
       setBaseGhz('');
@@ -189,6 +194,7 @@ export function HardwareLookupModal({
     setIsMobile(Boolean(item.is_mobile));
     setTdpW(item.tdp_w?.toString() ?? '');
     setProcessNm(item.process_nm?.toString() ?? '');
+    setPassmarkScore(item.passmark_score?.toString() ?? '');
 
     if (partType === 'cpu') {
       setCodename(item.codename ?? '');
@@ -252,6 +258,28 @@ export function HardwareLookupModal({
       return;
     }
 
+    const trimmedScore = passmarkScore.trim();
+    let parsedPassmarkScore: number | null = null;
+    if (trimmedScore) {
+      if (!/^\d+$/.test(trimmedScore)) {
+        setError('PassMark score must be a positive whole number.');
+        return;
+      }
+      parsedPassmarkScore = Number.parseInt(trimmedScore, 10);
+      if (!Number.isSafeInteger(parsedPassmarkScore) || parsedPassmarkScore <= 0) {
+        setError('PassMark score must be a positive whole number.');
+        return;
+      }
+    }
+
+    const existingPart = partType === 'cpu' ? editingCpu : editingGpu;
+    const scoreUpdatedAt =
+      parsedPassmarkScore === null
+        ? null
+        : parsedPassmarkScore !== (existingPart?.passmark_score ?? null)
+          ? new Date().toISOString()
+          : (existingPart?.score_updated_at ?? new Date().toISOString());
+
     setSaving(true);
     setError(null);
     try {
@@ -274,7 +302,9 @@ export function HardwareLookupModal({
             memory_type: memType.trim() || null,
             memory_speed_mhz: toNumOrNull(memSpeedMhz),
             launch_date: launchDate.trim() || null,
-            rank: toNumOrNull(rank),
+            rank: editingCpu?.rank ?? null,
+            passmark_score: parsedPassmarkScore,
+            score_updated_at: scoreUpdatedAt,
             is_mobile: isMobile,
             spec_url: specUrl.trim() || null,
           },
@@ -294,7 +324,9 @@ export function HardwareLookupModal({
             directx_version: dxVersion.trim() || null,
             directx_feature_level: dxFeatureLevel.trim() || null,
             category: category.trim() || null,
-            rank: toNumOrNull(rank),
+            rank: editingGpu?.rank ?? null,
+            passmark_score: parsedPassmarkScore,
+            score_updated_at: scoreUpdatedAt,
             is_mobile: isMobile,
             spec_url: specUrl.trim() || null,
           },
@@ -457,27 +489,69 @@ export function HardwareLookupModal({
               </div>
             </div>
 
-            <div>
-              <label className="mb-1 flex items-center justify-between text-xs font-medium text-slate-300">
-                <span>Canonical Spec URL (Intel ARK / AMD / TechPowerUp)</span>
-                {specUrl ? (
-                  <a
-                    href={specUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 text-cyan-300 hover:underline"
-                  >
-                    Test link <ExternalLink className="h-3 w-3" />
-                  </a>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div className="sm:col-span-2">
+                <label className="mb-1 flex items-center justify-between text-xs font-medium text-slate-300">
+                  <span>Canonical Spec URL (Intel ARK / AMD / TechPowerUp)</span>
+                  {specUrl ? (
+                    <a
+                      href={specUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-cyan-300 hover:underline"
+                    >
+                      Test link <ExternalLink className="h-3 w-3" />
+                    </a>
+                  ) : null}
+                </label>
+                <input
+                  type="url"
+                  value={specUrl}
+                  onChange={(e) => setSpecUrl(e.target.value)}
+                  placeholder="https://..."
+                  className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-xs text-cyan-200"
+                />
+              </div>
+              <div>
+                <label className="mb-1 flex items-center justify-between gap-2 text-xs font-medium text-slate-300">
+                  <span>
+                    {partType === 'cpu'
+                      ? 'PassMark CPU Mark'
+                      : 'PassMark G3D Mark'}
+                  </span>
+                  {name.trim() ? (
+                    <a
+                      href={buildPassMarkSearchUrl(partType, brand, name)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-[11px] font-normal text-cyan-300 hover:underline"
+                    >
+                      Lookup <ExternalLink className="h-2.5 w-2.5" />
+                    </a>
+                  ) : null}
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={passmarkScore}
+                  onChange={(e) => setPassmarkScore(e.target.value)}
+                  placeholder={partType === 'cpu' ? 'e.g. 21820' : 'e.g. 19462'}
+                  className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-xs text-white"
+                />
+                {formatScoreUpdatedDate(
+                  (partType === 'cpu' ? editingCpu : editingGpu)
+                    ?.score_updated_at,
+                ) ? (
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    Updated{' '}
+                    {formatScoreUpdatedDate(
+                      (partType === 'cpu' ? editingCpu : editingGpu)
+                        ?.score_updated_at,
+                    )}
+                  </p>
                 ) : null}
-              </label>
-              <input
-                type="url"
-                value={specUrl}
-                onChange={(e) => setSpecUrl(e.target.value)}
-                placeholder="https://..."
-                className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-xs text-cyan-200"
-              />
+              </div>
             </div>
 
             {partType === 'cpu' ? (

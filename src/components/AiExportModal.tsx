@@ -1,17 +1,20 @@
 import { useMemo, useState } from 'react';
 import { Check, Copy, Download, FileCode2, FileText, X } from 'lucide-react';
 import { buildAiExportJson, buildAiExportMarkdown } from '../lib/aiExport';
+import type { RigFleetStanding } from '../lib/scoring';
 import type { ComputerWithRelations, DeviceType } from '../types/database';
 
 interface AiExportModalProps {
   open: boolean;
   computers: ComputerWithRelations[];
+  fleetStandings: Map<number, RigFleetStanding>;
   onClose: () => void;
 }
 
 export function AiExportModal({
   open,
   computers,
+  fleetStandings,
   onClose,
 }: AiExportModalProps) {
   const [format, setFormat] = useState<'markdown' | 'json'>('markdown');
@@ -29,9 +32,9 @@ export function AiExportModal({
   const output = useMemo(
     () =>
       format === 'markdown'
-        ? buildAiExportMarkdown(scopedRigs)
-        : buildAiExportJson(scopedRigs),
-    [format, scopedRigs],
+        ? buildAiExportMarkdown(scopedRigs, fleetStandings)
+        : buildAiExportJson(scopedRigs, fleetStandings),
+    [format, scopedRigs, fleetStandings],
   );
 
   if (!open) return null;
@@ -64,7 +67,7 @@ export function AiExportModal({
               Export Inventory for AI Assistant
             </h2>
             <p className="text-xs text-slate-400">
-              Share rigs, specs, DirectX levels, and 3DMark scores in one paste for upgrade or game compatibility advice
+              Share rigs, PassMark scores, Fleet Ranks, DirectX levels, and 3DMark scores in one paste for upgrade or game compatibility advice
             </p>
           </div>
           <button

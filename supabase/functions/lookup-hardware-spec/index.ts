@@ -43,6 +43,7 @@ export interface HardwareLookupResult {
   directx_version?: string | null;
   directx_feature_level?: string | null;
   category?: string | null;
+  passmark_score?: number | null;
   summary?: string | null;
 }
 
@@ -65,6 +66,7 @@ const CPU_CATALOG: HardwareLookupResult[] = [
     memory_speed_mhz: 5600,
     launch_date: "2023.Q4",
     is_mobile: false,
+    passmark_score: 58141,
     spec_url:
       "https://www.intel.com/content/www/us/en/products/sku/236773/intel-core-i9-processor-14900k-36m-cache-up-to-6-00-ghz/specifications.html",
     source: "catalog",
@@ -88,6 +90,7 @@ const CPU_CATALOG: HardwareLookupResult[] = [
     memory_speed_mhz: 5600,
     launch_date: "2023.Q4",
     is_mobile: false,
+    passmark_score: 51884,
     spec_url:
       "https://www.intel.com/content/www/us/en/products/sku/236783/intel-core-i7-processor-14700k-33m-cache-up-to-5-60-ghz/specifications.html",
     source: "catalog",
@@ -111,6 +114,7 @@ const CPU_CATALOG: HardwareLookupResult[] = [
     memory_speed_mhz: 5600,
     launch_date: "2022.Q4",
     is_mobile: false,
+    passmark_score: 37426,
     spec_url:
       "https://www.intel.com/content/www/us/en/products/sku/230493/intel-core-i513600k-processor-24m-cache-up-to-5-10-ghz/specifications.html",
     source: "catalog",
@@ -134,6 +138,7 @@ const CPU_CATALOG: HardwareLookupResult[] = [
     memory_speed_mhz: 4800,
     launch_date: "2022.Q1",
     is_mobile: false,
+    passmark_score: 19516,
     spec_url:
       "https://www.intel.com/content/www/us/en/products/sku/134587/intel-core-i512400f-processor-18m-cache-up-to-4-40-ghz/specifications.html",
     source: "catalog",
@@ -157,6 +162,7 @@ const CPU_CATALOG: HardwareLookupResult[] = [
     memory_speed_mhz: 2666,
     launch_date: "2018.Q4",
     is_mobile: false,
+    passmark_score: 18015,
     spec_url:
       "https://www.intel.com/content/www/us/en/products/sku/186605/intel-core-i99900k-processor-16m-cache-up-to-5-00-ghz/specifications.html",
     source: "catalog",
@@ -180,6 +186,7 @@ const CPU_CATALOG: HardwareLookupResult[] = [
     memory_speed_mhz: 2400,
     launch_date: "2017.Q1",
     is_mobile: true,
+    passmark_score: 6892,
     spec_url:
       "https://www.intel.com/content/www/us/en/products/sku/97185/intel-core-i77700hq-processor-6m-cache-up-to-3-80-ghz/specifications.html",
     source: "catalog",
@@ -203,6 +210,7 @@ const CPU_CATALOG: HardwareLookupResult[] = [
     memory_speed_mhz: 1600,
     launch_date: "2014.Q2",
     is_mobile: false,
+    passmark_score: 5594,
     spec_url:
       "https://www.intel.com/content/www/us/en/products/sku/80810/intel-core-i54690-processor-6m-cache-up-to-3-90-ghz/specifications.html",
     source: "catalog",
@@ -226,6 +234,7 @@ const CPU_CATALOG: HardwareLookupResult[] = [
     memory_speed_mhz: 1600,
     launch_date: "2012.Q2",
     is_mobile: false,
+    passmark_score: 4653,
     spec_url:
       "https://www.intel.com/content/www/us/en/products/sku/68316/intel-core-i53470-processor-6m-cache-up-to-3-60-ghz/specifications.html",
     source: "catalog",
@@ -249,6 +258,7 @@ const CPU_CATALOG: HardwareLookupResult[] = [
     memory_speed_mhz: 1066,
     launch_date: "2007.Q1",
     is_mobile: false,
+    passmark_score: 1850,
     spec_url:
       "https://www.intel.com/content/www/us/en/products/sku/29765/intel-core2-quad-processor-q6600-8m-cache-2-40-ghz-1066-mhz-fsb/specifications.html",
     source: "catalog",
@@ -272,6 +282,7 @@ const CPU_CATALOG: HardwareLookupResult[] = [
     memory_speed_mhz: 5600,
     launch_date: "2024.Q4",
     is_mobile: false,
+    passmark_score: 39911,
     spec_url:
       "https://www.amd.com/en/products/processors/desktops/ryzen/9000-series/amd-ryzen-7-9800x3d.html",
     source: "catalog",
@@ -295,6 +306,7 @@ const CPU_CATALOG: HardwareLookupResult[] = [
     memory_speed_mhz: 5200,
     launch_date: "2023.Q2",
     is_mobile: false,
+    passmark_score: 34279,
     spec_url:
       "https://www.amd.com/en/products/processors/desktops/ryzen/7000-series/amd-ryzen-7-7800x3d.html",
     source: "catalog",
@@ -318,6 +330,7 @@ const CPU_CATALOG: HardwareLookupResult[] = [
     memory_speed_mhz: 3200,
     launch_date: "2022.Q2",
     is_mobile: false,
+    passmark_score: 28290,
     spec_url:
       "https://www.amd.com/en/products/processors/desktops/ryzen/5000-series/amd-ryzen-7-5800x3d.html",
     source: "catalog",
@@ -341,6 +354,7 @@ const CPU_CATALOG: HardwareLookupResult[] = [
     memory_speed_mhz: 3200,
     launch_date: "2020.Q4",
     is_mobile: false,
+    passmark_score: 21820,
     spec_url:
       "https://www.amd.com/en/products/processors/desktops/ryzen/5000-series/amd-ryzen-5-5600x.html",
     source: "catalog",
@@ -364,6 +378,7 @@ const CPU_CATALOG: HardwareLookupResult[] = [
     memory_speed_mhz: 3200,
     launch_date: "2019.Q3",
     is_mobile: false,
+    passmark_score: 17643,
     spec_url:
       "https://www.amd.com/en/products/processors/desktops/ryzen/3000-series/amd-ryzen-5-3600.html",
     source: "catalog",
@@ -387,6 +402,7 @@ const CPU_CATALOG: HardwareLookupResult[] = [
     memory_speed_mhz: 7500,
     launch_date: "2024.Q1",
     is_mobile: true,
+    passmark_score: 29114,
     spec_url:
       "https://www.amd.com/en/products/processors/laptop/ryzen/8000-series/amd-ryzen-9-8945hs.html",
     source: "catalog",
@@ -410,6 +426,7 @@ const CPU_CATALOG: HardwareLookupResult[] = [
     memory_speed_mhz: 7500,
     launch_date: "2023.Q2",
     is_mobile: true,
+    passmark_score: 29698,
     spec_url:
       "https://www.amd.com/en/products/processors/laptop/ryzen/7000-series/amd-ryzen-9-7940hs.html",
     source: "catalog",
@@ -433,6 +450,7 @@ const CPU_CATALOG: HardwareLookupResult[] = [
     memory_speed_mhz: 1866,
     launch_date: "2012.Q4",
     is_mobile: false,
+    passmark_score: 6096,
     spec_url:
       "https://www.amd.com/en/search/site-search.html#q=FX-8350",
     source: "catalog",
@@ -456,6 +474,7 @@ const CPU_CATALOG: HardwareLookupResult[] = [
     memory_speed_mhz: 1333,
     launch_date: "2009.Q4",
     is_mobile: false,
+    passmark_score: 2679,
     spec_url:
       "https://www.amd.com/en/search/site-search.html#q=Phenom%20II%20X4%20965",
     source: "catalog",
@@ -478,6 +497,7 @@ const GPU_CATALOG: HardwareLookupResult[] = [
     directx_feature_level: "12_2",
     category: "High-End",
     is_mobile: false,
+    passmark_score: 38012,
     spec_url:
       "https://www.nvidia.com/en-us/geforce/graphics-cards/40-series/rtx-4090/",
     source: "catalog",
@@ -497,6 +517,7 @@ const GPU_CATALOG: HardwareLookupResult[] = [
     directx_feature_level: "12_2",
     category: "Upper-Mid",
     is_mobile: false,
+    passmark_score: 29939,
     spec_url:
       "https://www.nvidia.com/en-us/geforce/graphics-cards/40-series/rtx-4070-family/",
     source: "catalog",
@@ -516,6 +537,7 @@ const GPU_CATALOG: HardwareLookupResult[] = [
     directx_feature_level: "12_2",
     category: "High-End Mobile",
     is_mobile: true,
+    passmark_score: 19462,
     spec_url:
       "https://www.nvidia.com/en-us/geforce/laptops/40-series/",
     source: "catalog",
@@ -535,6 +557,7 @@ const GPU_CATALOG: HardwareLookupResult[] = [
     directx_feature_level: "12_2",
     category: "Mid-Range",
     is_mobile: false,
+    passmark_score: 20206,
     spec_url:
       "https://www.nvidia.com/en-us/geforce/graphics-cards/30-series/rtx-3060-3060ti/",
     source: "catalog",
@@ -554,6 +577,7 @@ const GPU_CATALOG: HardwareLookupResult[] = [
     directx_feature_level: "12_2",
     category: "High-End",
     is_mobile: false,
+    passmark_score: 21396,
     spec_url:
       "https://www.techpowerup.com/gpu-specs/geforce-rtx-2080-ti.c3305",
     source: "catalog",
@@ -573,6 +597,7 @@ const GPU_CATALOG: HardwareLookupResult[] = [
     directx_feature_level: "12_1",
     category: "High-End",
     is_mobile: false,
+    passmark_score: 18597,
     spec_url:
       "https://www.techpowerup.com/gpu-specs/geforce-gtx-1080-ti.c2877",
     source: "catalog",
@@ -592,6 +617,7 @@ const GPU_CATALOG: HardwareLookupResult[] = [
     directx_feature_level: "12_1",
     category: "Mid-Range",
     is_mobile: false,
+    passmark_score: 9635,
     spec_url:
       "https://www.techpowerup.com/gpu-specs/geforce-gtx-970.c2620",
     source: "catalog",
@@ -611,6 +637,7 @@ const GPU_CATALOG: HardwareLookupResult[] = [
     directx_feature_level: "12_2",
     category: "Upper-Mid",
     is_mobile: false,
+    passmark_score: 24482,
     spec_url:
       "https://www.amd.com/en/products/graphics/desktops/radeon/7000-series/amd-radeon-rx-7800-xt.html",
     source: "catalog",
@@ -630,6 +657,7 @@ const GPU_CATALOG: HardwareLookupResult[] = [
     directx_feature_level: "12_2",
     category: "Mid-Range",
     is_mobile: false,
+    passmark_score: 15031,
     spec_url:
       "https://www.amd.com/en/products/graphics/desktops/radeon/6000-series/amd-radeon-rx-6600.html",
     source: "catalog",
@@ -649,6 +677,7 @@ const GPU_CATALOG: HardwareLookupResult[] = [
     directx_feature_level: "12_2",
     category: "Entry / Low-Profile",
     is_mobile: false,
+    passmark_score: 7756,
     spec_url:
       "https://www.amd.com/en/products/graphics/desktops/radeon/6000-series/amd-radeon-rx-6400.html",
     source: "catalog",
@@ -668,6 +697,7 @@ const GPU_CATALOG: HardwareLookupResult[] = [
     directx_feature_level: "12_0",
     category: "Mid-Range",
     is_mobile: false,
+    passmark_score: 8781,
     spec_url:
       "https://www.techpowerup.com/gpu-specs/radeon-rx-580.c2938",
     source: "catalog",
@@ -687,6 +717,7 @@ const GPU_CATALOG: HardwareLookupResult[] = [
     directx_feature_level: "12_2",
     category: "Mid-Range",
     is_mobile: false,
+    passmark_score: 16097,
     spec_url:
       "https://www.intel.com/content/www/us/en/products/sku/241598/intel-arc-b580-graphics/specifications.html",
     source: "catalog",
@@ -706,6 +737,7 @@ const GPU_CATALOG: HardwareLookupResult[] = [
     directx_feature_level: "12_2",
     category: "Mid-Range",
     is_mobile: false,
+    passmark_score: 13382,
     spec_url:
       "https://www.intel.com/content/www/us/en/products/sku/229151/intel-arc-a770-graphics-16gb/specifications.html",
     source: "catalog",
