@@ -7,8 +7,10 @@ import {
   formatShortRank,
   getRankBadgeClasses,
 } from '../lib/scoring';
+import { buildCpuResearchLinks, buildGpuResearchLinks } from '../lib/specLinks';
 import type { ComputerWithRelations, Cpu, Gpu } from '../types/database';
 import { DirectXBadge } from './DirectXBadge';
+import type { PartLinksEditTarget } from './PartLinksModal';
 import { SpecLink } from './SpecLink';
 
 interface PartsCatalogViewProps {
@@ -21,6 +23,7 @@ interface PartsCatalogViewProps {
   onDeleteCpu: (cpu: Cpu) => void;
   onEditGpu: (gpu: Gpu) => void;
   onDeleteGpu: (gpu: Gpu) => void;
+  onEditPartLinks?: (target: PartLinksEditTarget) => void;
 }
 
 function sortCatalogParts<
@@ -52,6 +55,7 @@ export function PartsCatalogView({
   onDeleteCpu,
   onEditGpu,
   onDeleteGpu,
+  onEditPartLinks,
 }: PartsCatalogViewProps) {
   const [subTab, setSubTab] = useState<'cpus' | 'gpus'>('cpus');
   const [search, setSearch] = useState('');
@@ -204,7 +208,12 @@ export function PartsCatalogView({
                     <td className="px-3 py-2.5 font-medium whitespace-nowrap">
                       <SpecLink
                         label={`${c.brand} ${c.name}`}
-                        specUrl={c.spec_url}
+                        links={buildCpuResearchLinks(c)}
+                        onEditLinks={
+                          onEditPartLinks
+                            ? () => onEditPartLinks({ kind: 'cpu', cpu: c })
+                            : undefined
+                        }
                       />
                     </td>
                     <td className="px-3 py-2.5 whitespace-nowrap text-slate-400">
@@ -297,7 +306,12 @@ export function PartsCatalogView({
                     <td className="px-3 py-2.5 font-medium whitespace-nowrap">
                       <SpecLink
                         label={`${g.brand} ${g.name}`}
-                        specUrl={g.spec_url}
+                        links={buildGpuResearchLinks(g)}
+                        onEditLinks={
+                          onEditPartLinks
+                            ? () => onEditPartLinks({ kind: 'gpu', gpu: g })
+                            : undefined
+                        }
                       />
                     </td>
                     <td className="px-3 py-2.5 whitespace-nowrap text-slate-400">

@@ -1,17 +1,28 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { ExternalLink, Globe, Loader2, Search, Sparkles, X } from 'lucide-react';
+import {
+  ExternalLink,
+  Globe,
+  Loader2,
+  Plus,
+  Search,
+  Sparkles,
+  Trash2,
+  X,
+} from 'lucide-react';
 import {
   buildPassMarkSearchUrl,
   formatScoreUpdatedDate,
 } from '../lib/scoring';
+import { getSafeHttpUrl, parseHttpUrl, PART_LINK_PRESETS } from '../lib/specLinks';
 import { supabase } from '../lib/supabase';
-import type { Cpu, Gpu } from '../types/database';
+import type { Cpu, Gpu, SpecLinkItem } from '../types/database';
 
 interface LookupResultItem {
   partType: 'cpu' | 'gpu';
   name: string;
   brand: string;
   spec_url: string;
+  spec_links?: SpecLinkItem[];
   source: string;
   codename?: string | null;
   socket?: string | null;
@@ -85,6 +96,7 @@ export function HardwareLookupModal({
   const [name, setName] = useState('');
   const [brand, setBrand] = useState(partType === 'cpu' ? 'Intel' : 'NVIDIA');
   const [specUrl, setSpecUrl] = useState('');
+  const [specLinks, setSpecLinks] = useState<Array<{ label: string; url: string }>>([]);
   const [isMobile, setIsMobile] = useState(false);
   const [tdpW, setTdpW] = useState('');
   const [processNm, setProcessNm] = useState('');
@@ -126,6 +138,7 @@ export function HardwareLookupModal({
       setName(editingCpu.name);
       setBrand(editingCpu.brand);
       setSpecUrl(editingCpu.spec_url ?? '');
+      setSpecLinks((editingCpu.spec_links ?? []).map((l) => ({ ...l })));
       setIsMobile(editingCpu.is_mobile);
       setTdpW(editingCpu.tdp_w?.toString() ?? '');
       setProcessNm(editingCpu.process_nm?.toString() ?? '');
@@ -145,6 +158,7 @@ export function HardwareLookupModal({
       setName(editingGpu.name);
       setBrand(editingGpu.brand);
       setSpecUrl(editingGpu.spec_url ?? '');
+      setSpecLinks((editingGpu.spec_links ?? []).map((l) => ({ ...l })));
       setIsMobile(editingGpu.is_mobile);
       setTdpW(editingGpu.tdp_w?.toString() ?? '');
       setProcessNm(editingGpu.process_nm?.toString() ?? '');
@@ -160,6 +174,7 @@ export function HardwareLookupModal({
       setName(initialMode === 'manual' ? initialQuery : '');
       setBrand(partType === 'cpu' ? 'Intel' : 'NVIDIA');
       setSpecUrl('');
+      setSpecLinks([]);
       setIsMobile(false);
       setTdpW('');
       setProcessNm('');
@@ -191,6 +206,7 @@ export function HardwareLookupModal({
     setName(item.name);
     setBrand(item.brand);
     setSpecUrl(item.spec_url ?? '');
+    setSpecLinks((item.spec_links ?? []).map((l) => ({ ...l })));
     setIsMobile(Boolean(item.is_mobile));
     setTdpW(item.tdp_w?.toString() ?? '');
     setProcessNm(item.process_nm?.toString() ?? '');
@@ -272,6 +288,41 @@ export function HardwareLookupModal({
       }
     }
 
+    const parsedSpecUrl = parseHttpUrl(specUrl);
+    if (!parsedSpecUrl.valid) {
+      setError(`Canonical Spec URL: ${parsedSpecUrl.error}`);
+      return;
+    }
+
+    const cleanedSpecLinks: SpecLinkItem[] = [];
+    const seenUrls = new Set<string>();
+    if (parsedSpecUrl.normalizedUrl) {
+      seenUrls.add(parsedSpecUrl.normalizedUrl);
+    }
+
+    for (let i = 0; i < specLinks.length; i += 1) {
+      const row = specLinks[i];
+      const lbl = row.label.trim();
+      const rawUrl = row.url.trim();
+      if (!lbl && !rawUrl) continue;
+      if (!lbl) {
+        setError(`Secondary research link #${i + 1} needs a label.`);
+        return;
+      }
+      if (!rawUrl) {
+        setError(`Secondary research link "${lbl}" needs a URL.`);
+        return;
+      }
+      const parsed = parseHttpUrl(rawUrl);
+      if (!parsed.valid || !parsed.normalizedUrl) {
+        setError(`Secondary research link "${lbl}": ${parsed.error}`);
+        return;
+      }
+      if (seenUrls.has(parsed.normalizedUrl)) continue;
+      seenUrls.add(parsed.normalizedUrl);
+      cleanedSpecLinks.push({ label: lbl, url: parsed.normalizedUrl });
+    }
+
     const existingPart = partType === 'cpu' ? editingCpu : editingGpu;
     const scoreUpdatedAt =
       parsedPassmarkScore === null
@@ -306,7 +357,8 @@ export function HardwareLookupModal({
             passmark_score: parsedPassmarkScore,
             score_updated_at: scoreUpdatedAt,
             is_mobile: isMobile,
-            spec_url: specUrl.trim() || null,
+            spec_url: parsedSpecUrl.normalizedUrl,
+            spec_links: cleanedSpecLinks,
           },
           editingCpu?.id,
         );
@@ -328,7 +380,8 @@ export function HardwareLookupModal({
             passmark_score: parsedPassmarkScore,
             score_updated_at: scoreUpdatedAt,
             is_mobile: isMobile,
-            spec_url: specUrl.trim() || null,
+            spec_url: parsedSpecUrl.normalizedUrl,
+            spec_links: cleanedSpecLinks,
           },
           editingGpu?.id,
         );
@@ -493,9 +546,9 @@ export function HardwareLookupModal({
               <div className="sm:col-span-2">
                 <label className="mb-1 flex items-center justify-between text-xs font-medium text-slate-300">
                   <span>Canonical Spec URL (Intel ARK / AMD / TechPowerUp)</span>
-                  {specUrl ? (
+                  {getSafeHttpUrl(specUrl) ? (
                     <a
-                      href={specUrl}
+                      href={getSafeHttpUrl(specUrl)!}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="inline-flex items-center gap-1 text-cyan-300 hover:underline"
@@ -552,6 +605,98 @@ export function HardwareLookupModal({
                   </p>
                 ) : null}
               </div>
+            </div>
+
+            {/* Secondary Research Links */}
+            <div className="space-y-2 rounded-xl border border-slate-800 bg-slate-950/50 p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-[11px] font-semibold text-slate-300 uppercase">
+                  Secondary Research Links ({specLinks.length})
+                </span>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {PART_LINK_PRESETS[partType].labelPresets.map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() =>
+                        setSpecLinks((prev) => [
+                          ...prev,
+                          { label: preset, url: '' },
+                        ])
+                      }
+                      className="rounded border border-slate-700/80 bg-slate-900 px-1.5 py-0.5 text-[10px] text-slate-300 hover:border-cyan-500/50 hover:text-cyan-200"
+                    >
+                      + {preset}
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setSpecLinks((prev) => [...prev, { label: '', url: '' }])
+                    }
+                    className="inline-flex items-center gap-1 rounded-md border border-slate-700 bg-slate-900 px-2 py-0.5 text-[11px] font-medium text-slate-200 hover:border-cyan-500/50 hover:text-white"
+                  >
+                    <Plus className="h-3 w-3 text-cyan-400" />
+                    Add Link
+                  </button>
+                </div>
+              </div>
+
+              {specLinks.length === 0 ? (
+                <p className="text-[11px] text-slate-500">
+                  Optional direct links shown in the split-button dropdown (e.g. PassMark, TechPowerUp, official page). Search fallbacks remain automatic.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {specLinks.map((row, idx) => (
+                    <div
+                      key={idx}
+                      className="grid items-center gap-2 sm:grid-cols-12"
+                    >
+                      <input
+                        type="text"
+                        value={row.label}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setSpecLinks((prev) =>
+                            prev.map((item, i) =>
+                              i === idx ? { ...item, label: val } : item,
+                            ),
+                          );
+                        }}
+                        placeholder="Label (e.g. PassMark)"
+                        className="rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-xs text-white sm:col-span-4"
+                      />
+                      <input
+                        type="url"
+                        value={row.url}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setSpecLinks((prev) =>
+                            prev.map((item, i) =>
+                              i === idx ? { ...item, url: val } : item,
+                            ),
+                          );
+                        }}
+                        placeholder="https://..."
+                        className="rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1.5 font-mono text-xs text-cyan-200 sm:col-span-7"
+                      />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setSpecLinks((prev) =>
+                            prev.filter((_, i) => i !== idx),
+                          )
+                        }
+                        title="Remove link"
+                        className="flex justify-center rounded-lg p-1.5 text-slate-500 hover:bg-rose-500/15 hover:text-rose-300 sm:col-span-1"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             {partType === 'cpu' ? (

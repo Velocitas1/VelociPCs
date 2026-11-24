@@ -22,8 +22,20 @@ import {
   getRankBadgeClasses,
   type RigFleetStanding,
 } from '../lib/scoring';
+import {
+  buildAibGpuResearchLinks,
+  buildCpuResearchLinks,
+  buildGpuResearchLinks,
+  buildLaptopResearchLinks,
+  buildMotherboardResearchLinks,
+  buildPsuResearchLinks,
+  buildRamResearchLinks,
+  buildStorageDriveResearchLinks,
+  buildWifiResearchLinks,
+} from '../lib/specLinks';
 import type { Benchmark, ComputerWithRelations } from '../types/database';
 import { DirectXBadge } from './DirectXBadge';
+import type { PartLinksEditTarget } from './PartLinksModal';
 import { SpecLink } from './SpecLink';
 
 interface ComputerDetailModalProps {
@@ -40,6 +52,7 @@ interface ComputerDetailModalProps {
     focusUrl?: boolean,
   ) => void;
   onDeleteBenchmark: (benchmarkId: number) => void;
+  onEditPartLinks?: (target: PartLinksEditTarget) => void;
 }
 
 export function ComputerDetailModal({
@@ -52,6 +65,7 @@ export function ComputerDetailModal({
   onAddBenchmark,
   onEditBenchmark,
   onDeleteBenchmark,
+  onEditPartLinks,
 }: ComputerDetailModalProps) {
   if (!rig) return null;
 
@@ -117,18 +131,51 @@ export function ComputerDetailModal({
               ) : null}
             </div>
             <h2 className="mt-2 text-xl font-bold text-white">{rig.name}</h2>
-            <p className="text-xs text-slate-400">
-              {isLaptop
-                ? [rig.brand, rig.model].filter(Boolean).join(' ')
-                : [rig.motherboard_brand, rig.motherboard_name]
+            <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-slate-400">
+              {isLaptop ? (
+                (() => {
+                  const laptopLabel = [rig.brand, rig.model]
+                    .filter(Boolean)
+                    .join(' ');
+                  const laptopLinks = buildLaptopResearchLinks(
+                    rig.brand,
+                    rig.model,
+                    rig.part_spec_links?.laptop,
+                  );
+                  return laptopLabel ? (
+                    <SpecLink
+                      compact
+                      label={laptopLabel}
+                      links={laptopLinks}
+                      onEditLinks={
+                        onEditPartLinks
+                          ? () =>
+                              onEditPartLinks({
+                                kind: 'computer_slot',
+                                computerId: rig.id,
+                                rigName: rig.name,
+                                slot: 'laptop',
+                                partLabel: laptopLabel,
+                                currentMap: rig.part_spec_links,
+                              })
+                          : undefined
+                      }
+                    />
+                  ) : null;
+                })()
+              ) : (
+                <span>
+                  {[rig.motherboard_brand, rig.motherboard_name]
                     .filter(Boolean)
                     .join(' ')}
-              {rig.build_date ? ` · Built ${rig.build_date}` : ''}
+                </span>
+              )}
+              {rig.build_date ? <span>· Built {rig.build_date}</span> : null}
               {standing?.compositeScore !== null &&
-              standing?.compositeScore !== undefined
-                ? ` · Composite ${formatPassMark(standing.compositeScore)}`
-                : ''}
-            </p>
+              standing?.compositeScore !== undefined ? (
+                <span>· Composite {formatPassMark(standing.compositeScore)}</span>
+              ) : null}
+            </div>
           </div>
 
           <div className="flex items-center gap-2">
@@ -178,7 +225,13 @@ export function ComputerDetailModal({
                     <SpecLink
                       label={`${rig.cpu.brand} ${rig.cpu.name}`}
                       prefix={rig.cpu_count > 1 ? `${rig.cpu_count}x` : undefined}
-                      specUrl={rig.cpu.spec_url}
+                      links={buildCpuResearchLinks(rig.cpu)}
+                      onEditLinks={
+                        onEditPartLinks
+                          ? () =>
+                              onEditPartLinks({ kind: 'cpu', cpu: rig.cpu! })
+                          : undefined
+                      }
                     />
                   </div>
                   <dl className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-slate-300">
@@ -277,16 +330,59 @@ export function ComputerDetailModal({
                   <div className="text-sm font-semibold">
                     <SpecLink
                       label={`${rig.gpu.brand} ${rig.gpu.name}`}
-                      specUrl={rig.gpu.spec_url}
+                      links={buildGpuResearchLinks(rig.gpu, {
+                        manufacturer: rig.gpu_aib_manufacturer,
+                        model: rig.gpu_aib_model,
+                        savedEntry: rig.part_spec_links?.gpu_aib,
+                      })}
+                      onEditLinks={
+                        onEditPartLinks
+                          ? () =>
+                              onEditPartLinks({ kind: 'gpu', gpu: rig.gpu! })
+                          : undefined
+                      }
                     />
                   </div>
                   <dl className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-slate-300">
                     <div>
                       <dt className="text-slate-500">Board Partner / OEM</dt>
-                      <dd>
-                        {[rig.gpu_aib_manufacturer, rig.gpu_aib_model]
-                          .filter(Boolean)
-                          .join(' ') || 'Reference'}
+                      <dd className="mt-0.5">
+                        {(() => {
+                          const aibLabel = [
+                            rig.gpu_aib_manufacturer,
+                            rig.gpu_aib_model,
+                          ]
+                            .filter(Boolean)
+                            .join(' ');
+                          const aibLinks = buildAibGpuResearchLinks(
+                            rig.gpu,
+                            rig.gpu_aib_manufacturer,
+                            rig.gpu_aib_model,
+                            rig.part_spec_links?.gpu_aib,
+                          );
+                          return (
+                            <SpecLink
+                              compact
+                              label={aibLabel || 'Reference'}
+                              links={aibLinks}
+                              onEditLinks={
+                                onEditPartLinks
+                                  ? () =>
+                                      onEditPartLinks({
+                                        kind: 'computer_slot',
+                                        computerId: rig.id,
+                                        rigName: rig.name,
+                                        slot: 'gpu_aib',
+                                        partLabel:
+                                          aibLabel ||
+                                          `${rig.gpu!.brand} ${rig.gpu!.name} Board Partner`,
+                                        currentMap: rig.part_spec_links,
+                                      })
+                                  : undefined
+                              }
+                            />
+                          );
+                        })()}
                       </dd>
                     </div>
                     <div>
@@ -357,11 +453,21 @@ export function ComputerDetailModal({
               {rig.igpu ? (
                 <div className="mt-2.5 border-t border-slate-800 pt-2 text-xs text-slate-400">
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span>
-                      Integrated GPU:{' '}
+                    <span className="flex flex-wrap items-center gap-1.5">
+                      <span>Integrated GPU:</span>
                       <SpecLink
+                        compact
                         label={`${rig.igpu.brand} ${rig.igpu.name}`}
-                        specUrl={rig.igpu.spec_url}
+                        links={buildGpuResearchLinks(rig.igpu)}
+                        onEditLinks={
+                          onEditPartLinks
+                            ? () =>
+                                onEditPartLinks({
+                                  kind: 'gpu',
+                                  gpu: rig.igpu!,
+                                })
+                            : undefined
+                        }
                       />
                     </span>
                     <span className="flex items-center gap-1.5 font-mono text-[11px] text-slate-300">
@@ -396,28 +502,125 @@ export function ComputerDetailModal({
               <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-slate-300">
                 <div>
                   <dt className="text-slate-500">RAM</dt>
-                  <dd className="font-mono">
-                    {rig.ram_gb ? `${rig.ram_gb} GB` : '—'}{' '}
-                    {rig.ram_type ?? ''}
-                    {rig.ram_speed_mhz ? ` @ ${rig.ram_speed_mhz} MHz` : ''}
+                  <dd className="mt-0.5 font-mono">
+                    {(() => {
+                      const ramText = [
+                        rig.ram_gb ? `${rig.ram_gb} GB` : null,
+                        rig.ram_type || null,
+                        rig.ram_speed_mhz ? `@ ${rig.ram_speed_mhz} MHz` : null,
+                      ]
+                        .filter(Boolean)
+                        .join(' ');
+                      const ramLinks = buildRamResearchLinks(
+                        rig.part_spec_links?.ram,
+                      );
+                      if (ramLinks.length > 0 || (onEditPartLinks && ramText)) {
+                        return (
+                          <SpecLink
+                            compact
+                            label={ramText || '—'}
+                            links={ramLinks}
+                            onEditLinks={
+                              onEditPartLinks
+                                ? () =>
+                                    onEditPartLinks({
+                                      kind: 'computer_slot',
+                                      computerId: rig.id,
+                                      rigName: rig.name,
+                                      slot: 'ram',
+                                      partLabel: ramText || 'RAM Kit',
+                                      currentMap: rig.part_spec_links,
+                                    })
+                                : undefined
+                            }
+                          />
+                        );
+                      }
+                      return ramText || '—';
+                    })()}
                   </dd>
                 </div>
                 {!isLaptop ? (
                   <>
                     <div>
                       <dt className="text-slate-500">Motherboard</dt>
-                      <dd>
-                        {[rig.motherboard_brand, rig.motherboard_name]
-                          .filter(Boolean)
-                          .join(' ') || '—'}
+                      <dd className="mt-0.5">
+                        {(() => {
+                          const mbText = [
+                            rig.motherboard_brand,
+                            rig.motherboard_name,
+                          ]
+                            .filter(Boolean)
+                            .join(' ');
+                          const mbLinks = buildMotherboardResearchLinks(
+                            rig.motherboard_brand,
+                            rig.motherboard_name,
+                            rig.motherboard_launch,
+                            rig.part_spec_links?.motherboard,
+                          );
+                          return mbText || mbLinks.length > 0 ? (
+                            <SpecLink
+                              compact
+                              label={mbText || 'Motherboard'}
+                              links={mbLinks}
+                              onEditLinks={
+                                onEditPartLinks
+                                  ? () =>
+                                      onEditPartLinks({
+                                        kind: 'computer_slot',
+                                        computerId: rig.id,
+                                        rigName: rig.name,
+                                        slot: 'motherboard',
+                                        partLabel: mbText || 'Motherboard',
+                                        currentMap: rig.part_spec_links,
+                                      })
+                                  : undefined
+                              }
+                            />
+                          ) : (
+                            '—'
+                          );
+                        })()}
                       </dd>
                     </div>
                     <div>
                       <dt className="text-slate-500">Power Supply</dt>
-                      <dd className="font-mono">
-                        {rig.psu_wattage
-                          ? `${rig.psu_wattage}W ${rig.psu_brand ?? ''}`
-                          : '—'}
+                      <dd className="mt-0.5 font-mono">
+                        {(() => {
+                          const psuText = [
+                            rig.psu_wattage ? `${rig.psu_wattage}W` : null,
+                            rig.psu_brand,
+                          ]
+                            .filter(Boolean)
+                            .join(' ');
+                          const psuLinks = buildPsuResearchLinks(
+                            rig.psu_brand,
+                            rig.psu_wattage,
+                            rig.part_spec_links?.psu,
+                          );
+                          return psuText || psuLinks.length > 0 ? (
+                            <SpecLink
+                              compact
+                              label={psuText || 'Power Supply'}
+                              links={psuLinks}
+                              onEditLinks={
+                                onEditPartLinks
+                                  ? () =>
+                                      onEditPartLinks({
+                                        kind: 'computer_slot',
+                                        computerId: rig.id,
+                                        rigName: rig.name,
+                                        slot: 'psu',
+                                        partLabel: psuText || 'Power Supply',
+                                        currentMap: rig.part_spec_links,
+                                      })
+                                  : undefined
+                              }
+                            />
+                          ) : (
+                            '—'
+                          );
+                        })()}
                       </dd>
                     </div>
                     <div>
@@ -457,13 +660,54 @@ export function ComputerDetailModal({
                     </div>
                     <div>
                       <dt className="text-slate-500">Wi-Fi / Bluetooth</dt>
-                      <dd>
-                        {[rig.wifi_brand, rig.wifi_product, rig.wifi_model]
-                          .filter(Boolean)
-                          .join(' ') || '—'}
-                        {rig.bluetooth_version
-                          ? ` · BT ${rig.bluetooth_version}`
-                          : ''}
+                      <dd className="mt-0.5 flex flex-wrap items-center gap-1.5">
+                        {(() => {
+                          const wifiText = [
+                            rig.wifi_brand,
+                            rig.wifi_product,
+                            rig.wifi_model,
+                          ]
+                            .filter(Boolean)
+                            .join(' ');
+                          const wifiLinks = buildWifiResearchLinks(
+                            rig.wifi_brand,
+                            rig.wifi_product,
+                            rig.wifi_model,
+                            rig.part_spec_links?.wifi,
+                          );
+                          return (
+                            <>
+                              {wifiText || wifiLinks.length > 0 ? (
+                                <SpecLink
+                                  compact
+                                  label={wifiText || 'Wi-Fi Adapter'}
+                                  links={wifiLinks}
+                                  onEditLinks={
+                                    onEditPartLinks
+                                      ? () =>
+                                          onEditPartLinks({
+                                            kind: 'computer_slot',
+                                            computerId: rig.id,
+                                            rigName: rig.name,
+                                            slot: 'wifi',
+                                            partLabel:
+                                              wifiText || 'Wi-Fi Adapter',
+                                            currentMap: rig.part_spec_links,
+                                          })
+                                      : undefined
+                                  }
+                                />
+                              ) : (
+                                <span>—</span>
+                              )}
+                              {rig.bluetooth_version ? (
+                                <span className="font-mono text-[11px] text-slate-400">
+                                  · BT {rig.bluetooth_version}
+                                </span>
+                              ) : null}
+                            </>
+                          );
+                        })()}
                       </dd>
                     </div>
                   </>
@@ -486,12 +730,25 @@ export function ComputerDetailModal({
                       className="rounded-lg border border-slate-800 bg-slate-900/70 p-2.5"
                     >
                       <div className="flex items-center justify-between gap-2 font-medium text-slate-200">
-                        <span>
-                          {d.capacity_gb ? `${d.capacity_gb} GB ` : ''}
-                          {[d.brand, d.model].filter(Boolean).join(' ') ||
-                            'Drive'}
-                        </span>
-                        <span className="rounded bg-slate-800 px-1.5 py-0.5 font-mono text-[11px] text-slate-300">
+                        <SpecLink
+                          compact
+                          label={`${d.capacity_gb ? `${d.capacity_gb} GB ` : ''}${
+                            [d.brand, d.model].filter(Boolean).join(' ') ||
+                            'Drive'
+                          }`}
+                          links={buildStorageDriveResearchLinks(d)}
+                          onEditLinks={
+                            onEditPartLinks
+                              ? () =>
+                                  onEditPartLinks({
+                                    kind: 'storage_drive',
+                                    rigName: rig.name,
+                                    drive: d,
+                                  })
+                              : undefined
+                          }
+                        />
+                        <span className="shrink-0 rounded bg-slate-800 px-1.5 py-0.5 font-mono text-[11px] text-slate-300">
                           {d.form_factor ?? 'Storage'}
                         </span>
                       </div>

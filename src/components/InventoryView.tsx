@@ -19,14 +19,24 @@ import {
   getRankBadgeClasses,
   type RigFleetStanding,
 } from '../lib/scoring';
+import {
+  buildCpuResearchLinks,
+  buildGpuResearchLinks,
+  buildLaptopResearchLinks,
+  buildMotherboardResearchLinks,
+  buildPsuResearchLinks,
+  buildWifiResearchLinks,
+} from '../lib/specLinks';
 import type { ComputerWithRelations, DeviceType } from '../types/database';
 import { DirectXBadge } from './DirectXBadge';
+import type { PartLinksEditTarget } from './PartLinksModal';
 import { SpecLink } from './SpecLink';
 
 interface InventoryViewProps {
   computers: ComputerWithRelations[];
   fleetStandings: Map<number, RigFleetStanding>;
   onSelectComputer: (rig: ComputerWithRelations) => void;
+  onEditPartLinks?: (target: PartLinksEditTarget) => void;
 }
 
 type DxFilter = 'all' | 'dx12_ult' | 'dx12' | 'dx11' | 'legacy';
@@ -42,6 +52,7 @@ export function InventoryView({
   computers,
   fleetStandings,
   onSelectComputer,
+  onEditPartLinks,
 }: InventoryViewProps) {
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState<'All' | DeviceType>('All');
@@ -382,14 +393,79 @@ export function InventoryView({
                     <h3 className="mt-1.5 text-base font-bold text-white transition group-hover:text-cyan-300">
                       {rig.name}
                     </h3>
-                    <p className="text-xs text-slate-400">
-                      {isLaptop
-                        ? [rig.brand, rig.model].filter(Boolean).join(' ') ||
-                          'Laptop System'
-                        : [rig.motherboard_brand, rig.motherboard_name]
+                    <div className="mt-0.5 text-xs text-slate-400">
+                      {isLaptop ? (
+                        (() => {
+                          const laptopLabel = [rig.brand, rig.model]
                             .filter(Boolean)
-                            .join(' ') || 'Custom Desktop'}
-                    </p>
+                            .join(' ');
+                          return laptopLabel ? (
+                            <SpecLink
+                              compact
+                              stopPropagation
+                              label={laptopLabel}
+                              links={buildLaptopResearchLinks(
+                                rig.brand,
+                                rig.model,
+                                rig.part_spec_links?.laptop,
+                              )}
+                              onEditLinks={
+                                onEditPartLinks
+                                  ? () =>
+                                      onEditPartLinks({
+                                        kind: 'computer_slot',
+                                        computerId: rig.id,
+                                        rigName: rig.name,
+                                        slot: 'laptop',
+                                        partLabel: laptopLabel,
+                                        currentMap: rig.part_spec_links,
+                                      })
+                                  : undefined
+                              }
+                            />
+                          ) : (
+                            <span>Laptop System</span>
+                          );
+                        })()
+                      ) : (
+                        (() => {
+                          const mbLabel = [
+                            rig.motherboard_brand,
+                            rig.motherboard_name,
+                          ]
+                            .filter(Boolean)
+                            .join(' ');
+                          return mbLabel ? (
+                            <SpecLink
+                              compact
+                              stopPropagation
+                              label={mbLabel}
+                              links={buildMotherboardResearchLinks(
+                                rig.motherboard_brand,
+                                rig.motherboard_name,
+                                rig.motherboard_launch,
+                                rig.part_spec_links?.motherboard,
+                              )}
+                              onEditLinks={
+                                onEditPartLinks
+                                  ? () =>
+                                      onEditPartLinks({
+                                        kind: 'computer_slot',
+                                        computerId: rig.id,
+                                        rigName: rig.name,
+                                        slot: 'motherboard',
+                                        partLabel: mbLabel,
+                                        currentMap: rig.part_spec_links,
+                                      })
+                                  : undefined
+                              }
+                            />
+                          ) : (
+                            <span>Custom Desktop</span>
+                          );
+                        })()
+                      )}
+                    </div>
                   </div>
 
                   <DirectXBadge
@@ -408,10 +484,20 @@ export function InventoryView({
                     <div className="text-right">
                       {rig.cpu ? (
                         <SpecLink
+                          compact
                           label={`${rig.cpu.brand} ${rig.cpu.name}`}
                           prefix={rig.cpu_count > 1 ? `${rig.cpu_count}x` : undefined}
-                          specUrl={rig.cpu.spec_url}
+                          links={buildCpuResearchLinks(rig.cpu)}
                           stopPropagation
+                          onEditLinks={
+                            onEditPartLinks
+                              ? () =>
+                                  onEditPartLinks({
+                                    kind: 'cpu',
+                                    cpu: rig.cpu!,
+                                  })
+                              : undefined
+                          }
                         />
                       ) : (
                         <span className="text-slate-500">Unassigned</span>
@@ -444,16 +530,40 @@ export function InventoryView({
                     <div className="text-right">
                       {rig.gpu ? (
                         <SpecLink
+                          compact
                           label={`${rig.gpu.brand} ${rig.gpu.name}`}
-                          specUrl={rig.gpu.spec_url}
+                          links={buildGpuResearchLinks(rig.gpu, {
+                            manufacturer: rig.gpu_aib_manufacturer,
+                            model: rig.gpu_aib_model,
+                            savedEntry: rig.part_spec_links?.gpu_aib,
+                          })}
                           stopPropagation
+                          onEditLinks={
+                            onEditPartLinks
+                              ? () =>
+                                  onEditPartLinks({
+                                    kind: 'gpu',
+                                    gpu: rig.gpu!,
+                                  })
+                              : undefined
+                          }
                         />
                       ) : rig.igpu ? (
                         <SpecLink
+                          compact
                           label={`${rig.igpu.brand} ${rig.igpu.name}`}
                           prefix="iGPU"
-                          specUrl={rig.igpu.spec_url}
+                          links={buildGpuResearchLinks(rig.igpu)}
                           stopPropagation
+                          onEditLinks={
+                            onEditPartLinks
+                              ? () =>
+                                  onEditPartLinks({
+                                    kind: 'gpu',
+                                    gpu: rig.igpu!,
+                                  })
+                              : undefined
+                          }
                         />
                       ) : (
                         <span className="text-slate-500">
@@ -492,18 +602,60 @@ export function InventoryView({
                     </span>
                   </div>
 
-                  {isLaptop && (rig.screen_size_inches || rig.wifi_product) ? (
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="flex items-center gap-1.5 text-slate-400">
+                  {isLaptop &&
+                  (rig.screen_size_inches ||
+                    rig.wifi_brand ||
+                    rig.wifi_product ||
+                    rig.wifi_model) ? (
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="flex shrink-0 items-center gap-1.5 text-slate-400">
                         <Wifi className="h-3.5 w-3.5 text-slate-500" />
                         Display / Wi-Fi
                       </span>
-                      <span className="truncate font-mono text-[11px] text-slate-300">
-                        {rig.screen_size_inches
-                          ? `${rig.screen_size_inches}" ${rig.screen_resolution ?? ''}`
-                          : ''}
-                        {rig.wifi_product ? ` · ${rig.wifi_product}` : ''}
-                      </span>
+                      <div className="flex flex-wrap items-center justify-end gap-1.5 text-right font-mono text-[11px] text-slate-300">
+                        {rig.screen_size_inches ? (
+                          <span>
+                            {rig.screen_size_inches}"{' '}
+                            {rig.screen_resolution ?? ''}
+                          </span>
+                        ) : null}
+                        {(() => {
+                          const wifiLabel = [
+                            rig.wifi_brand,
+                            rig.wifi_product,
+                            rig.wifi_model,
+                          ]
+                            .filter(Boolean)
+                            .join(' ');
+                          if (!wifiLabel) return null;
+                          return (
+                            <SpecLink
+                              compact
+                              stopPropagation
+                              label={wifiLabel}
+                              links={buildWifiResearchLinks(
+                                rig.wifi_brand,
+                                rig.wifi_product,
+                                rig.wifi_model,
+                                rig.part_spec_links?.wifi,
+                              )}
+                              onEditLinks={
+                                onEditPartLinks
+                                  ? () =>
+                                      onEditPartLinks({
+                                        kind: 'computer_slot',
+                                        computerId: rig.id,
+                                        rigName: rig.name,
+                                        slot: 'wifi',
+                                        partLabel: wifiLabel,
+                                        currentMap: rig.part_spec_links,
+                                      })
+                                  : undefined
+                              }
+                            />
+                          );
+                        })()}
+                      </div>
                     </div>
                   ) : null}
 
@@ -513,9 +665,34 @@ export function InventoryView({
                         <Zap className="h-3.5 w-3.5 text-slate-500" />
                         PSU
                       </span>
-                      <span className="font-mono text-[11px] text-slate-300">
-                        {rig.psu_wattage}W {rig.psu_brand ?? ''}
-                      </span>
+                      {(() => {
+                        const psuLabel = `${rig.psu_wattage}W ${rig.psu_brand ?? ''}`.trim();
+                        return (
+                          <SpecLink
+                            compact
+                            stopPropagation
+                            label={psuLabel}
+                            links={buildPsuResearchLinks(
+                              rig.psu_brand,
+                              rig.psu_wattage,
+                              rig.part_spec_links?.psu,
+                            )}
+                            onEditLinks={
+                              onEditPartLinks
+                                ? () =>
+                                    onEditPartLinks({
+                                      kind: 'computer_slot',
+                                      computerId: rig.id,
+                                      rigName: rig.name,
+                                      slot: 'psu',
+                                      partLabel: psuLabel,
+                                      currentMap: rig.part_spec_links,
+                                    })
+                                : undefined
+                            }
+                          />
+                        );
+                      })()}
                     </div>
                   ) : null}
                 </div>

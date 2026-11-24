@@ -1,13 +1,22 @@
 import { useCallback, useEffect, useState } from 'react';
 import { compareBenchmarksNewestFirst } from '../lib/benchmarks';
+import {
+  getSafeHttpUrl,
+  sanitizePartSpecLinks,
+  sanitizeSpecLinks,
+} from '../lib/specLinks';
 import { isSupabaseConfigured, supabase } from '../lib/supabase';
 import type {
   Benchmark,
   BuildGameCompatibility,
   Computer,
+  ComputerPartLinkSlot,
   ComputerWithRelations,
   Cpu,
   Gpu,
+  PartSpecLinkEntry,
+  PartSpecLinksMap,
+  SpecLinkItem,
   SteamGame,
 } from '../types/database';
 
@@ -22,6 +31,8 @@ export interface DriveDraft {
   read_mb_s: number | null;
   write_mb_s: number | null;
   is_primary: boolean;
+  spec_url: string | null;
+  spec_links: SpecLinkItem[];
 }
 
 export type ComputerUpsertPayload = Omit<
@@ -93,19 +104,39 @@ export function useInventory() {
       if (steamRes.error) throw steamRes.error;
       if (compatRes.error) throw compatRes.error;
 
+      const normalizeCpu = (cpu: Cpu): Cpu => ({
+        ...cpu,
+        spec_url: getSafeHttpUrl(cpu.spec_url),
+        spec_links: sanitizeSpecLinks(cpu.spec_links),
+      });
+
+      const normalizeGpu = (gpu: Gpu): Gpu => ({
+        ...gpu,
+        spec_url: getSafeHttpUrl(gpu.spec_url),
+        spec_links: sanitizeSpecLinks(gpu.spec_links),
+      });
+
       const normalizedComputers = (
         (compRes.data ?? []) as ComputerWithRelations[]
       ).map((c) => ({
         ...c,
-        storage_drives: [...(c.storage_drives ?? [])].sort((a, b) =>
-          Number(b.is_primary) - Number(a.is_primary),
-        ),
+        part_spec_links: sanitizePartSpecLinks(c.part_spec_links),
+        cpu: c.cpu ? normalizeCpu(c.cpu) : null,
+        gpu: c.gpu ? normalizeGpu(c.gpu) : null,
+        igpu: c.igpu ? normalizeGpu(c.igpu) : null,
+        storage_drives: [...(c.storage_drives ?? [])]
+          .map((d) => ({
+            ...d,
+            spec_url: getSafeHttpUrl(d.spec_url),
+            spec_links: sanitizeSpecLinks(d.spec_links),
+          }))
+          .sort((a, b) => Number(b.is_primary) - Number(a.is_primary)),
         benchmarks: [...(c.benchmarks ?? [])].sort(compareBenchmarksNewestFirst),
       }));
 
       setComputers(normalizedComputers);
-      setCpus((cpuRes.data ?? []) as Cpu[]);
-      setGpus((gpuRes.data ?? []) as Gpu[]);
+      setCpus(((cpuRes.data ?? []) as Cpu[]).map(normalizeCpu));
+      setGpus(((gpuRes.data ?? []) as Gpu[]).map(normalizeGpu));
       setSteamGames((steamRes.data ?? []) as SteamGame[]);
       setCompatibilityRows((compatRes.data ?? []) as BuildGameCompatibility[]);
     } catch (err) {
@@ -173,6 +204,8 @@ export function useInventory() {
                 read_mb_s: d.read_mb_s,
                 write_mb_s: d.write_mb_s,
                 is_primary: index === 0 ? true : d.is_primary,
+                spec_url: getSafeHttpUrl(d.spec_url),
+                spec_links: sanitizeSpecLinks(d.spec_links),
               })),
             );
           if (insDrivesErr) throw insDrivesErr;
@@ -305,6 +338,87 @@ export function useInventory() {
     [refresh],
   );
 
+  const updateCpuLinks = useCallback(
+    async (
+      id: number,
+      specUrl: string | null,
+      specLinks: SpecLinkItem[],
+    ): Promise<void> => {
+      const { error: updErr } = await supabase
+        .from('cpus')
+        .update({
+          spec_url: getSafeHttpUrl(specUrl),
+          spec_links: sanitizeSpecLinks(specLinks),
+        })
+        .eq('id', id);
+      if (updErr) throw updErr;
+      await refresh();
+    },
+    [refresh],
+  );
+
+  const updateGpuLinks = useCallback(
+    async (
+      id: number,
+      specUrl: string | null,
+      specLinks: SpecLinkItem[],
+    ): Promise<void> => {
+      const { error: updErr } = await supabase
+        .from('gpus')
+        .update({
+          spec_url: getSafeHttpUrl(specUrl),
+          spec_links: sanitizeSpecLinks(specLinks),
+        })
+        .eq('id', id);
+      if (updErr) throw updErr;
+      await refresh();
+    },
+    [refresh],
+  );
+
+  const updateStorageDriveLinks = useCallback(
+    async (
+      id: number,
+      specUrl: string | null,
+      specLinks: SpecLinkItem[],
+    ): Promise<void> => {
+      const { error: updErr } = await supabase
+        .from('storage_drives')
+        .update({
+          spec_url: getSafeHttpUrl(specUrl),
+          spec_links: sanitizeSpecLinks(specLinks),
+        })
+        .eq('id', id);
+      if (updErr) throw updErr;
+      await refresh();
+    },
+    [refresh],
+  );
+
+  const updateComputerPartSlotLinks = useCallback(
+    async (
+      computerId: number,
+      currentMap: PartSpecLinksMap,
+      slot: ComputerPartLinkSlot,
+      entry: PartSpecLinkEntry | null,
+    ): Promise<void> => {
+      const nextRaw: PartSpecLinksMap = { ...currentMap };
+      if (entry) {
+        nextRaw[slot] = entry;
+      } else {
+        delete nextRaw[slot];
+      }
+      const cleaned = sanitizePartSpecLinks(nextRaw);
+      const { error: updErr } = await supabase
+        .from('computers')
+        .update({ part_spec_links: cleaned })
+        .eq('id', computerId);
+      if (updErr) throw updErr;
+      await refresh();
+    },
+    [refresh],
+  );
+
   return {
     computers,
     cpus,
@@ -322,5 +436,9 @@ export function useInventory() {
     deleteGpu,
     saveBenchmark,
     deleteBenchmark,
+    updateCpuLinks,
+    updateGpuLinks,
+    updateStorageDriveLinks,
+    updateComputerPartSlotLinks,
   };
 }

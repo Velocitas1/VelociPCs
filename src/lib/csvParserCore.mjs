@@ -8,102 +8,102 @@ export const CPU_ENRICHMENT = {
   'amd|ryzen 9 8945hs': {
     socket: 'FP8',
     codename: 'Hawk Point (Zen 4)',
-    spec_url: 'https://www.amd.com/en/search/site-search.html#q=Ryzen%209%208945HS',
+    spec_url: 'https://www.amd.com/en/products/processors/laptop/ryzen/8000-series/amd-ryzen-9-8945hs.html',
   },
   'amd|ryzen 9 4900hs': {
     socket: 'FP6',
     codename: 'Renoir (Zen 2)',
-    spec_url: 'https://www.amd.com/en/search/site-search.html#q=Ryzen%209%204900HS',
+    spec_url: 'https://www.amd.com/en/support/downloads/drivers.html/processors/ryzen/ryzen-4000-series/amd-ryzen-9-4900hs.html',
   },
   'intel|core i7 7700hq': {
     socket: 'FCBGA1440',
     codename: 'Kaby Lake',
-    spec_url: 'https://www.intel.com/content/www/us/en/ark/search.html?_charset_=UTF-8&q=Core+i7-7700HQ',
+    spec_url: 'https://www.intel.com/content/www/us/en/products/sku/97185/intel-core-i77700hq-processor-6m-cache-up-to-3-80-ghz/specifications.html',
   },
   'intel|core i7 6700hq': {
     socket: 'FCBGA1440',
     codename: 'Skylake',
-    spec_url: 'https://www.intel.com/content/www/us/en/ark/search.html?_charset_=UTF-8&q=Core+i7-6700HQ',
+    spec_url: 'https://www.intel.com/content/www/us/en/products/sku/88967/intel-core-i76700hq-processor-6m-cache-up-to-3-50-ghz/specifications.html',
   },
   'intel|core i7-4700mq': {
     socket: 'FCPGA946',
     codename: 'Haswell',
-    spec_url: 'https://www.intel.com/content/www/us/en/ark/search.html?_charset_=UTF-8&q=Core+i7-4700MQ',
+    spec_url: 'https://www.intel.com/content/www/us/en/products/sku/75117/intel-core-i74700mq-processor-6m-cache-up-to-3-40-ghz/specifications.html',
   },
   'intel|core i5 3230m': {
     socket: 'FCPGA988',
     codename: 'Ivy Bridge',
-    spec_url: 'https://www.intel.com/content/www/us/en/ark/search.html?_charset_=UTF-8&q=Core+i5-3230M',
+    spec_url: 'https://www.intel.com/content/www/us/en/products/sku/72164/intel-core-i53230m-processor-3m-cache-up-to-3-20-ghz-rpga/specifications.html',
   },
   'intel|core i7 4800mq': {
     socket: 'FCPGA946',
     codename: 'Haswell',
-    spec_url: 'https://www.intel.com/content/www/us/en/ark/search.html?_charset_=UTF-8&q=Core+i7-4800MQ',
+    spec_url: 'https://www.intel.com/content/www/us/en/products/sku/75128/intel-core-i74800mq-processor-6m-cache-up-to-3-70-ghz/specifications.html',
   },
   'intel|core i7 720qm': {
     socket: 'PGA988',
     codename: 'Clarksfield',
-    spec_url: 'https://www.intel.com/content/www/us/en/ark/search.html?_charset_=UTF-8&q=Core+i7-720QM',
+    spec_url: 'https://www.cpubenchmark.net/cpu.php?cpu=Intel+Core+i7-720QM+%40+1.60GHz&id=851',
   },
   'intel|core 2 duo t9550': {
     socket: 'Socket P',
     codename: 'Penryn',
-    spec_url: 'https://www.intel.com/content/www/us/en/ark/search.html?_charset_=UTF-8&q=Core+2+Duo+T9550',
+    spec_url: 'https://www.cpubenchmark.net/cpu.php?cpu=Intel+Core2+Duo+T9550+%40+2.66GHz&id=1011',
   },
   'intel|core i9 9900k': {
     socket: 'LGA1151',
     codename: 'Coffee Lake',
-    spec_url: 'https://www.intel.com/content/www/us/en/ark/search.html?_charset_=UTF-8&q=Core+i9-9900K',
+    spec_url: 'https://www.intel.com/content/www/us/en/products/sku/186605/intel-core-i99900k-processor-16m-cache-up-to-5-00-ghz/specifications.html',
   },
   'amd|ryzen 5 5600x': {
     socket: 'AM4',
     codename: 'Vermeer (Zen 3)',
-    spec_url: 'https://www.amd.com/en/search/site-search.html#q=Ryzen%205%205600X',
+    spec_url: 'https://www.amd.com/en/products/processors/desktops/ryzen/5000-series/amd-ryzen-5-5600x.html',
   },
   'amd|ryzen 3 2200g': {
     socket: 'AM4',
     codename: 'Raven Ridge',
-    spec_url: 'https://www.amd.com/en/search/site-search.html#q=Ryzen%203%202200G',
+    spec_url: 'https://www.amd.com/en/support/downloads/drivers.html/processors/ryzen/ryzen-2000-series/amd-ryzen-3-2200g.html',
   },
   'intel|core i5-4690': {
     socket: 'LGA1150',
     codename: 'Haswell',
-    spec_url: 'https://www.intel.com/content/www/us/en/ark/search.html?_charset_=UTF-8&q=Core+i5-4690',
+    spec_url: 'https://www.intel.com/content/www/us/en/products/sku/80810/intel-core-i54690-processor-6m-cache-up-to-3-90-ghz/specifications.html',
   },
   'amd|phenom ii x4 965': {
     socket: 'AM3',
     codename: 'Deneb',
-    spec_url: 'https://www.amd.com/en/search/site-search.html#q=Phenom%20II%20X4%20965',
+    spec_url: 'https://www.cpubenchmark.net/cpu.php?cpu=AMD+Phenom+II+X4+965&id=370',
   },
   'amd|phenom ii x4 830': {
     socket: 'AM3',
     codename: 'Deneb',
-    spec_url: 'https://www.amd.com/en/search/site-search.html#q=Phenom%20II%20X4%20830',
+    spec_url: 'https://www.cpubenchmark.net/cpu.php?cpu=AMD+Phenom+II+X4+830&id=356',
   },
   'amd|athlon ii x4 620': {
     socket: 'AM3',
     codename: 'Propus',
-    spec_url: 'https://www.amd.com/en/search/site-search.html#q=Athlon%20II%20X4%20620',
+    spec_url: 'https://www.cpubenchmark.net/cpu.php?cpu=AMD+Athlon+II+X4+620&id=166',
   },
   'intel|core 2 quad q8200': {
     socket: 'LGA775',
     codename: 'Yorkfield',
-    spec_url: 'https://www.intel.com/content/www/us/en/ark/search.html?_charset_=UTF-8&q=Core+2+Quad+Q8200',
+    spec_url: 'https://www.cpubenchmark.net/cpu.php?cpu=Intel+Core2+Quad+Q8200+%40+2.33GHz&id=1040',
   },
   'intel|core i5-3470': {
     socket: 'LGA1155',
     codename: 'Ivy Bridge',
-    spec_url: 'https://www.intel.com/content/www/us/en/ark/search.html?_charset_=UTF-8&q=Core+i5-3470',
+    spec_url: 'https://www.intel.com/content/www/us/en/products/sku/68316/intel-core-i53470-processor-6m-cache-up-to-3-60-ghz/specifications.html',
   },
   'intel|xeon x5260': {
     socket: 'LGA771',
     codename: 'Wolfdale',
-    spec_url: 'https://www.intel.com/content/www/us/en/ark/search.html?_charset_=UTF-8&q=Xeon+X5260',
+    spec_url: 'https://www.cpubenchmark.net/cpu.php?cpu=Intel+Xeon+X5260+%40+3.33GHz&id=1292',
   },
   'amd|fx-8350 black edition': {
     socket: 'AM3+',
     codename: 'Vishera (Piledriver)',
-    spec_url: 'https://www.amd.com/en/search/site-search.html#q=FX-8350',
+    spec_url: 'https://www.cpubenchmark.net/cpu.php?cpu=AMD+FX-8350+Eight-Core&id=1780',
   },
 };
 
@@ -117,7 +117,7 @@ export const GPU_ENRICHMENT = {
     process_nm: 5,
     tdp_w: 115,
     category: 'High-End Mobile',
-    spec_url: 'https://www.techpowerup.com/gpu-specs/?q=GeForce+RTX+4070+Mobile',
+    spec_url: 'https://www.techpowerup.com/gpu-specs/geforce-rtx-4070-mobile.c3944',
   },
   'nvidia|geforce rtx 2060 max-q|mobile': {
     architecture: 'Turing',
@@ -127,7 +127,7 @@ export const GPU_ENRICHMENT = {
     process_nm: 12,
     tdp_w: 65,
     category: 'Upper-Mid Mobile',
-    spec_url: 'https://www.techpowerup.com/gpu-specs/?q=GeForce+RTX+2060+Max-Q',
+    spec_url: 'https://www.techpowerup.com/gpu-specs/geforce-rtx-2060-max-q.c3533',
   },
   'nvidia|geforce gtx 1050|mobile': {
     architecture: 'Pascal',
@@ -136,7 +136,7 @@ export const GPU_ENRICHMENT = {
     bus_interface: 'PCIe 3.0 x16',
     process_nm: 14,
     tdp_w: 75,
-    spec_url: 'https://www.techpowerup.com/gpu-specs/?q=GeForce+GTX+1050+Mobile',
+    spec_url: 'https://www.techpowerup.com/gpu-specs/geforce-gtx-1050-mobile.c2917',
   },
   'nvidia|geforce gtx 960m|mobile': {
     architecture: 'Maxwell',
@@ -145,7 +145,7 @@ export const GPU_ENRICHMENT = {
     bus_interface: 'PCIe 3.0 x16',
     process_nm: 28,
     tdp_w: 60,
-    spec_url: 'https://www.techpowerup.com/gpu-specs/?q=GeForce+GTX+960M',
+    spec_url: 'https://www.techpowerup.com/gpu-specs/geforce-gtx-960m.c2635',
   },
   'nvidia|geforce gt 755m|mobile': {
     architecture: 'Kepler',
@@ -154,7 +154,7 @@ export const GPU_ENRICHMENT = {
     bus_interface: 'PCIe 3.0 x16',
     process_nm: 28,
     tdp_w: 50,
-    spec_url: 'https://www.techpowerup.com/gpu-specs/?q=GeForce+GT+755M',
+    spec_url: 'https://www.techpowerup.com/gpu-specs/geforce-gt-755m.c2420',
   },
   'nvidia|geforce gtx 660m|mobile': {
     architecture: 'Kepler',
@@ -163,7 +163,7 @@ export const GPU_ENRICHMENT = {
     bus_interface: 'PCIe 3.0 x16',
     process_nm: 28,
     tdp_w: 50,
-    spec_url: 'https://www.techpowerup.com/gpu-specs/?q=GeForce+GTX+660M',
+    spec_url: 'https://www.techpowerup.com/gpu-specs/geforce-gtx-660m.c345',
   },
   'amd|radeon hd 8790m|mobile': {
     architecture: 'GCN 1.0 (Mars)',
@@ -172,7 +172,7 @@ export const GPU_ENRICHMENT = {
     bus_interface: 'PCIe 3.0 x8',
     process_nm: 28,
     tdp_w: 50,
-    spec_url: 'https://www.techpowerup.com/gpu-specs/?q=Radeon+HD+8790M',
+    spec_url: 'https://www.techpowerup.com/gpu-specs/radeon-hd-8790m.c1798',
   },
   'nvidia|geforce gtx 260m|mobile': {
     architecture: 'Tesla 2.0 (G92B)',
@@ -181,7 +181,7 @@ export const GPU_ENRICHMENT = {
     bus_interface: 'MXM-III (PCIe 2.0 x16)',
     process_nm: 55,
     tdp_w: 75,
-    spec_url: 'https://www.techpowerup.com/gpu-specs/?q=GeForce+GTX+260M',
+    spec_url: 'https://www.techpowerup.com/gpu-specs/geforce-gtx-260m.c1510',
   },
   'nvidia|quadro nvs 160m|mobile': {
     architecture: 'Tesla (G98)',
@@ -191,7 +191,7 @@ export const GPU_ENRICHMENT = {
     process_nm: 65,
     tdp_w: 12,
     vram_gb: 0.25,
-    spec_url: 'https://www.techpowerup.com/gpu-specs/?q=Quadro+NVS+160M',
+    spec_url: 'https://www.videocardbenchmark.net/gpu.php?gpu=Quadro+NVS+160M&id=1626',
   },
 
   // Desktop GPUs
@@ -202,7 +202,7 @@ export const GPU_ENRICHMENT = {
     bus_interface: 'PCIe 3.0 x16',
     process_nm: 12,
     tdp_w: 250,
-    spec_url: 'https://www.techpowerup.com/gpu-specs/?q=GeForce+RTX+2080+Ti',
+    spec_url: 'https://www.techpowerup.com/gpu-specs/geforce-rtx-2080-ti.c3305',
   },
   'amd|radeon rx 580|desktop': {
     architecture: 'Polaris 20',
@@ -211,7 +211,7 @@ export const GPU_ENRICHMENT = {
     bus_interface: 'PCIe 3.0 x16',
     process_nm: 14,
     tdp_w: 185,
-    spec_url: 'https://www.amd.com/en/search/site-search.html#q=Radeon%20RX%20580',
+    spec_url: 'https://www.techpowerup.com/gpu-specs/radeon-rx-580.c2938',
   },
   'nvidia|geforce gtx 465|desktop': {
     architecture: 'Fermi (GF100)',
@@ -220,7 +220,7 @@ export const GPU_ENRICHMENT = {
     bus_interface: 'PCIe 2.0 x16',
     process_nm: 40,
     tdp_w: 200,
-    spec_url: 'https://www.techpowerup.com/gpu-specs/?q=GeForce+GTX+465',
+    spec_url: 'https://www.techpowerup.com/gpu-specs/geforce-gtx-465.c266',
   },
   'nvidia|geforce gtx 660|desktop': {
     architecture: 'Kepler (GK106)',
@@ -229,7 +229,7 @@ export const GPU_ENRICHMENT = {
     bus_interface: 'PCIe 3.0 x16',
     process_nm: 28,
     tdp_w: 140,
-    spec_url: 'https://www.techpowerup.com/gpu-specs/?q=GeForce+GTX+660',
+    spec_url: 'https://www.techpowerup.com/gpu-specs/geforce-gtx-660.c895',
   },
   'nvidia|geforce gtx 970|desktop': {
     architecture: 'Maxwell 2.0 (GM204)',
@@ -238,7 +238,7 @@ export const GPU_ENRICHMENT = {
     bus_interface: 'PCIe 3.0 x16',
     process_nm: 28,
     tdp_w: 145,
-    spec_url: 'https://www.techpowerup.com/gpu-specs/?q=GeForce+GTX+970',
+    spec_url: 'https://www.techpowerup.com/gpu-specs/geforce-gtx-970.c2620',
   },
   'amd|radeon hd 7770 vapor-x oc|desktop': {
     architecture: 'GCN 1.0 (Cape Verde)',
@@ -247,7 +247,7 @@ export const GPU_ENRICHMENT = {
     bus_interface: 'PCIe 3.0 x16',
     process_nm: 28,
     tdp_w: 80,
-    spec_url: 'https://www.techpowerup.com/gpu-specs/?q=Radeon+HD+7770',
+    spec_url: 'https://www.techpowerup.com/gpu-specs/radeon-hd-7770-ghz-edition.c308',
   },
   'amd|radeon hd 6670|desktop': {
     architecture: 'TeraScale 2 (Turks)',
@@ -256,7 +256,7 @@ export const GPU_ENRICHMENT = {
     bus_interface: 'PCI Express 2.1 x16',
     process_nm: 40,
     tdp_w: 66,
-    spec_url: 'https://www.techpowerup.com/gpu-specs/?q=Radeon+HD+6670',
+    spec_url: 'https://www.techpowerup.com/gpu-specs/radeon-hd-6670.c406',
   },
   'amd|radeon rx 6400|desktop': {
     architecture: 'RDNA 2 (Navi 24)',
@@ -265,7 +265,7 @@ export const GPU_ENRICHMENT = {
     bus_interface: 'PCIe 4.0 x4',
     process_nm: 6,
     tdp_w: 53,
-    spec_url: 'https://www.amd.com/en/search/site-search.html#q=Radeon%20RX%206400',
+    spec_url: 'https://www.techpowerup.com/gpu-specs/radeon-rx-6400.c3813',
   },
 };
 

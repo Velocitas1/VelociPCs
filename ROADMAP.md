@@ -26,7 +26,7 @@ Fastest everyday wins with minimal schema churn, establishing unified scoring, r
   - Add drag-and-drop left/right column reordering plus `←` / `→` buttons on column headers for keyboard and touch accessibility.
   - Add compare sort presets: `Manual` (auto-selected when dragging), `CPU` (PassMark CPU Mark), `GPU` (PassMark G3D Mark), `DirectX`, and `3DMark` (by suite), plus optional **"Differences Only"** toggle and row-winner highlights.
   - Persist selected rig IDs, column order, and sort mode in shareable URL query parameters (`?compare=...&sort=...`).
-- [ ] **Split-Button Spec & Research Links Across All Parts:**
+- [x] **Split-Button Spec & Research Links Across All Parts:**
   - Upgrade `src/components/SpecLink.tsx` into a split-button pattern (`[ ASUS GTX 970 | ▾ ]`) where the primary click opens the preferred canonical datasheet and the dropdown (`▾`) lists secondary research links:
     - **GPUs:** TechPowerUp chip spec · AIB board partner datasheet · PassMark G3D page
     - **CPUs:** Official Intel ARK / AMD page · TechPowerUp CPU DB · PassMark CPU page

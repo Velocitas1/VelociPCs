@@ -10,6 +10,7 @@ import {
   PASSMARK_GPU_WEIGHT,
   type RigFleetStanding,
 } from './scoring';
+import { getSafeHttpUrl } from './specLinks';
 
 export function getLatestScoresMap(
   rig: ComputerWithRelations,
@@ -104,6 +105,7 @@ export function buildAiExportJson(
               effective_passmark_score: standing?.effectiveCpuScore ?? null,
               score_updated_at: r.cpu.score_updated_at,
               spec_url: r.cpu.spec_url,
+              spec_links: r.cpu.spec_links,
             }
           : null,
         gpu: r.gpu
@@ -120,6 +122,7 @@ export function buildAiExportJson(
               passmark_score: r.gpu.passmark_score,
               score_updated_at: r.gpu.score_updated_at,
               spec_url: r.gpu.spec_url,
+              spec_links: r.gpu.spec_links,
             }
           : null,
         igpu: r.igpu
@@ -128,6 +131,7 @@ export function buildAiExportJson(
               brand: r.igpu.brand,
               passmark_score: r.igpu.passmark_score,
               spec_url: r.igpu.spec_url,
+              spec_links: r.igpu.spec_links,
             }
           : null,
         ram: r.ram_gb
@@ -143,6 +147,8 @@ export function buildAiExportJson(
           form_factor: d.form_factor,
           brand: d.brand,
           model: d.model,
+          spec_url: d.spec_url,
+          spec_links: d.spec_links,
         })),
         motherboard: r.motherboard_name
           ? `${r.motherboard_brand ? `${r.motherboard_brand} ` : ''}${r.motherboard_name}`
@@ -151,6 +157,7 @@ export function buildAiExportJson(
         display: r.screen_size_inches
           ? `${r.screen_size_inches}" ${r.screen_resolution ?? ''}`.trim()
           : null,
+        part_spec_links: r.part_spec_links,
         benchmarks_3dmark: getLatestScoresMap(r),
         benchmarks_3dmark_runs: r.benchmarks.map((b) => ({
           suite_name: b.suite_name,
@@ -259,11 +266,19 @@ export function buildAiExportMarkdown(
         );
       }
       if (r.brand || r.model) {
-        lines.push(`- **System:** ${[r.brand, r.model].filter(Boolean).join(' ')}`);
+        const laptopUrl = getSafeHttpUrl(r.part_spec_links?.laptop?.spec_url);
+        lines.push(
+          `- **System:** ${[r.brand, r.model].filter(Boolean).join(' ')}${
+            laptopUrl ? ` ([Specs](${laptopUrl}))` : ''
+          }`,
+        );
       }
       if (r.motherboard_name) {
+        const mbUrl = getSafeHttpUrl(r.part_spec_links?.motherboard?.spec_url);
         lines.push(
-          `- **Motherboard:** ${[r.motherboard_brand, r.motherboard_name].filter(Boolean).join(' ')}`,
+          `- **Motherboard:** ${[r.motherboard_brand, r.motherboard_name].filter(Boolean).join(' ')}${
+            mbUrl ? ` ([Specs](${mbUrl}))` : ''
+          }`,
         );
       }
       if (r.cpu) {
@@ -320,12 +335,13 @@ export function buildAiExportMarkdown(
       }
       if (r.storage_drives.length > 0) {
         const dStr = r.storage_drives
-          .map(
-            (d) =>
-              `${d.capacity_gb ?? '?'} GB ${d.form_factor ?? ''} (${[d.brand, d.model]
-                .filter(Boolean)
-                .join(' ')})`,
-          )
+          .map((d) => {
+            const driveUrl = getSafeHttpUrl(d.spec_url);
+            const label = `${d.capacity_gb ?? '?'} GB ${d.form_factor ?? ''} (${[d.brand, d.model]
+              .filter(Boolean)
+              .join(' ')})`.trim();
+            return driveUrl ? `${label} ([Specs](${driveUrl}))` : label;
+          })
           .join('; ');
         lines.push(`- **Storage:** ${dStr}`);
       }

@@ -10,6 +10,10 @@ import { CsvImportView } from './components/CsvImportView';
 import { HardwareLookupModal } from './components/HardwareLookupModal';
 import { Header } from './components/Header';
 import { InventoryView } from './components/InventoryView';
+import {
+  PartLinksModal,
+  type PartLinksEditTarget,
+} from './components/PartLinksModal';
 import { PartsCatalogView } from './components/PartsCatalogView';
 import { SteamCompatibilityView } from './components/SteamCompatibilityView';
 import { useAuth } from './hooks/useAuth';
@@ -90,6 +94,8 @@ export function App() {
     targetField: 'cpu_id' | 'gpu_id' | 'igpu_id';
     id: number;
   } | null>(null);
+  const [editingLinksTarget, setEditingLinksTarget] =
+    useState<PartLinksEditTarget | null>(null);
 
   const [toast, setToast] = useState<string | null>(null);
 
@@ -226,6 +232,9 @@ export function App() {
                 computers={inventory.computers}
                 fleetStandings={fleetStandings}
                 onSelectComputer={(rig) => setSelectedRigId(rig.id)}
+                onEditPartLinks={
+                  auth.isOwner ? setEditingLinksTarget : undefined
+                }
               />
             ) : null}
 
@@ -237,6 +246,9 @@ export function App() {
                 onChangeCompareState={setCompareState}
                 onSelectComputer={(rig) => setSelectedRigId(rig.id)}
                 onNotify={showToast}
+                onEditPartLinks={
+                  auth.isOwner ? setEditingLinksTarget : undefined
+                }
               />
             ) : null}
 
@@ -246,6 +258,9 @@ export function App() {
                 gpus={inventory.gpus}
                 computers={inventory.computers}
                 isOwner={auth.isOwner}
+                onEditPartLinks={
+                  auth.isOwner ? setEditingLinksTarget : undefined
+                }
                 onAddPartLookup={(partType) =>
                   setLookupState({
                     open: true,
@@ -349,6 +364,7 @@ export function App() {
         onDeleteBenchmark={(id) =>
           void inventory.deleteBenchmark(id).then(() => showToast('Benchmark deleted'))
         }
+        onEditPartLinks={auth.isOwner ? setEditingLinksTarget : undefined}
       />
 
       <ComputerFormModal
@@ -418,6 +434,32 @@ export function App() {
               ? `Updated ${payload.suite_name} benchmark`
               : `Logged ${payload.suite_name} score`,
           );
+        }}
+      />
+
+      <PartLinksModal
+        target={editingLinksTarget}
+        onClose={() => setEditingLinksTarget(null)}
+        onSaveCpuLinks={async (id, specUrl, specLinks) => {
+          await inventory.updateCpuLinks(id, specUrl, specLinks);
+          showToast('Updated CPU links');
+        }}
+        onSaveGpuLinks={async (id, specUrl, specLinks) => {
+          await inventory.updateGpuLinks(id, specUrl, specLinks);
+          showToast('Updated GPU links');
+        }}
+        onSaveStorageDriveLinks={async (id, specUrl, specLinks) => {
+          await inventory.updateStorageDriveLinks(id, specUrl, specLinks);
+          showToast('Updated drive links');
+        }}
+        onSaveComputerSlotLinks={async (computerId, currentMap, slot, entry) => {
+          await inventory.updateComputerPartSlotLinks(
+            computerId,
+            currentMap,
+            slot,
+            entry,
+          );
+          showToast('Updated part links');
         }}
       />
 

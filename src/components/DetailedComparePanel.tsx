@@ -51,12 +51,24 @@ import {
   getRankBadgeClasses,
   type RigFleetStanding,
 } from '../lib/scoring';
+import {
+  buildAibGpuResearchLinks,
+  buildCpuResearchLinks,
+  buildGpuResearchLinks,
+  buildLaptopResearchLinks,
+  buildMotherboardResearchLinks,
+  buildPsuResearchLinks,
+  buildRamResearchLinks,
+  buildStorageDriveResearchLinks,
+  buildWifiResearchLinks,
+} from '../lib/specLinks';
 import type {
   Benchmark,
   ComputerWithRelations,
   StorageDrive,
 } from '../types/database';
 import { DirectXBadge } from './DirectXBadge';
+import type { PartLinksEditTarget } from './PartLinksModal';
 import { SpecLink } from './SpecLink';
 
 interface DetailedComparePanelProps {
@@ -69,6 +81,7 @@ interface DetailedComparePanelProps {
   ) => void;
   onSelectComputer: (rig: ComputerWithRelations) => void;
   onNotify: (message: string) => void;
+  onEditPartLinks?: (target: PartLinksEditTarget) => void;
 }
 
 interface CompareRowDef {
@@ -161,6 +174,7 @@ export function DetailedComparePanel({
   onChangeCompareState,
   onSelectComputer,
   onNotify,
+  onEditPartLinks,
 }: DetailedComparePanelProps) {
   const [expandedSections, setExpandedSections] = useState<
     Record<CompareSectionId, boolean>
@@ -557,11 +571,34 @@ export function DetailedComparePanel({
               [rig.brand, rig.model].filter(Boolean).join(' ').trim(),
             render: (rig) => {
               const text = [rig.brand, rig.model].filter(Boolean).join(' ').trim();
-              return text ? (
-                <span className="text-slate-200">{text}</span>
-              ) : (
-                <span className="text-slate-600">—</span>
-              );
+              if (!text) return <span className="text-slate-600">—</span>;
+              if (rig.device_type === 'Laptop') {
+                return (
+                  <SpecLink
+                    compact
+                    label={text}
+                    links={buildLaptopResearchLinks(
+                      rig.brand,
+                      rig.model,
+                      rig.part_spec_links?.laptop,
+                    )}
+                    onEditLinks={
+                      onEditPartLinks
+                        ? () =>
+                            onEditPartLinks({
+                              kind: 'computer_slot',
+                              computerId: rig.id,
+                              rigName: rig.name,
+                              slot: 'laptop',
+                              partLabel: text,
+                              currentMap: rig.part_spec_links,
+                            })
+                        : undefined
+                    }
+                  />
+                );
+              }
+              return <span className="text-slate-200">{text}</span>;
             },
           },
           {
@@ -593,9 +630,16 @@ export function DetailedComparePanel({
             render: (rig) =>
               rig.cpu ? (
                 <SpecLink
+                  compact
                   label={`${rig.cpu.brand} ${rig.cpu.name}`}
                   prefix={rig.cpu_count > 1 ? `${rig.cpu_count}x` : undefined}
-                  specUrl={rig.cpu.spec_url}
+                  links={buildCpuResearchLinks(rig.cpu)}
+                  onEditLinks={
+                    onEditPartLinks
+                      ? () =>
+                          onEditPartLinks({ kind: 'cpu', cpu: rig.cpu! })
+                      : undefined
+                  }
                 />
               ) : (
                 <span className="text-slate-600">—</span>
@@ -827,16 +871,54 @@ export function DetailedComparePanel({
               const aib = [rig.gpu_aib_manufacturer, rig.gpu_aib_model]
                 .filter(Boolean)
                 .join(' ');
+              const aibLinks = buildAibGpuResearchLinks(
+                rig.gpu,
+                rig.gpu_aib_manufacturer,
+                rig.gpu_aib_model,
+                rig.part_spec_links?.gpu_aib,
+              );
               return (
-                <div className="space-y-0.5">
+                <div className="space-y-1">
                   <div>
                     <SpecLink
+                      compact
                       label={`${rig.gpu.brand} ${rig.gpu.name}`}
-                      specUrl={rig.gpu.spec_url}
+                      links={buildGpuResearchLinks(rig.gpu, {
+                        manufacturer: rig.gpu_aib_manufacturer,
+                        model: rig.gpu_aib_model,
+                        savedEntry: rig.part_spec_links?.gpu_aib,
+                      })}
+                      onEditLinks={
+                        onEditPartLinks
+                          ? () =>
+                              onEditPartLinks({ kind: 'gpu', gpu: rig.gpu! })
+                          : undefined
+                      }
                     />
                   </div>
-                  {aib ? (
-                    <p className="text-[11px] text-slate-400">{aib}</p>
+                  {aib || aibLinks.length > 0 ? (
+                    <div>
+                      <SpecLink
+                        compact
+                        label={aib || 'Board Partner'}
+                        links={aibLinks}
+                        onEditLinks={
+                          onEditPartLinks
+                            ? () =>
+                                onEditPartLinks({
+                                  kind: 'computer_slot',
+                                  computerId: rig.id,
+                                  rigName: rig.name,
+                                  slot: 'gpu_aib',
+                                  partLabel:
+                                    aib ||
+                                    `${rig.gpu!.brand} ${rig.gpu!.name} Board Partner`,
+                                  currentMap: rig.part_spec_links,
+                                })
+                            : undefined
+                        }
+                      />
+                    </div>
                   ) : null}
                 </div>
               );
@@ -850,8 +932,15 @@ export function DetailedComparePanel({
             render: (rig) =>
               rig.igpu ? (
                 <SpecLink
+                  compact
                   label={`${rig.igpu.brand} ${rig.igpu.name}`}
-                  specUrl={rig.igpu.spec_url}
+                  links={buildGpuResearchLinks(rig.igpu)}
+                  onEditLinks={
+                    onEditPartLinks
+                      ? () =>
+                          onEditPartLinks({ kind: 'gpu', gpu: rig.igpu! })
+                      : undefined
+                  }
                 />
               ) : (
                 <span className="text-slate-600">—</span>
@@ -1075,16 +1164,38 @@ export function DetailedComparePanel({
               if (!rig.ram_type && rig.ram_speed_mhz === null && !rig.ram_pc_rating) {
                 return <span className="text-slate-600">—</span>;
               }
+              const summary = `${rig.ram_type ?? ''}${
+                rig.ram_speed_mhz !== null
+                  ? `${rig.ram_type ? ' @ ' : ''}${rig.ram_speed_mhz} MHz`
+                  : ''
+              }`.trim();
+              const ramLinks = buildRamResearchLinks(rig.part_spec_links?.ram);
               return (
-                <div className="font-mono text-slate-200">
-                  <span>
-                    {rig.ram_type ?? ''}
-                    {rig.ram_speed_mhz !== null
-                      ? `${rig.ram_type ? ' @ ' : ''}${rig.ram_speed_mhz} MHz`
-                      : ''}
-                  </span>
+                <div className="flex flex-wrap items-center gap-1.5 font-mono text-slate-200">
+                  {ramLinks.length > 0 ? (
+                    <SpecLink
+                      compact
+                      label={summary || 'RAM Kit'}
+                      links={ramLinks}
+                      onEditLinks={
+                        onEditPartLinks
+                          ? () =>
+                              onEditPartLinks({
+                                kind: 'computer_slot',
+                                computerId: rig.id,
+                                rigName: rig.name,
+                                slot: 'ram',
+                                partLabel: summary || 'RAM Kit',
+                                currentMap: rig.part_spec_links,
+                              })
+                          : undefined
+                      }
+                    />
+                  ) : (
+                    <span>{summary}</span>
+                  )}
                   {rig.ram_pc_rating ? (
-                    <span className="ml-1.5 text-[11px] text-slate-400">
+                    <span className="text-[11px] text-slate-400">
                       ({rig.ram_pc_rating})
                     </span>
                   ) : null}
@@ -1146,12 +1257,39 @@ export function DetailedComparePanel({
               const name = [rig.motherboard_brand, rig.motherboard_name]
                 .filter(Boolean)
                 .join(' ');
-              if (!name && !rig.motherboard_launch) {
+              const mbLinks = buildMotherboardResearchLinks(
+                rig.motherboard_brand,
+                rig.motherboard_name,
+                rig.motherboard_launch,
+                rig.part_spec_links?.motherboard,
+              );
+              if (!name && !rig.motherboard_launch && mbLinks.length === 0) {
                 return <span className="text-slate-600">—</span>;
               }
               return (
                 <div className="space-y-0.5">
-                  <span className="text-slate-200">{name || '—'}</span>
+                  {name || mbLinks.length > 0 ? (
+                    <SpecLink
+                      compact
+                      label={name || 'Motherboard'}
+                      links={mbLinks}
+                      onEditLinks={
+                        onEditPartLinks
+                          ? () =>
+                              onEditPartLinks({
+                                kind: 'computer_slot',
+                                computerId: rig.id,
+                                rigName: rig.name,
+                                slot: 'motherboard',
+                                partLabel: name || 'Motherboard',
+                                currentMap: rig.part_spec_links,
+                              })
+                          : undefined
+                      }
+                    />
+                  ) : (
+                    <span className="text-slate-200">—</span>
+                  )}
                   {rig.motherboard_launch ? (
                     <p className="font-mono text-[11px] text-slate-400">
                       Launch {rig.motherboard_launch}
@@ -1267,10 +1405,21 @@ export function DetailedComparePanel({
                         className="rounded border border-slate-800/80 bg-slate-950/60 px-2 py-1"
                       >
                         <div className="flex flex-wrap items-center justify-between gap-1 text-[11px]">
-                          <span className="font-medium text-slate-200">
-                            {d.capacity_gb ? `${d.capacity_gb} GB ` : ''}
-                            {label}
-                          </span>
+                          <SpecLink
+                            compact
+                            label={`${d.capacity_gb ? `${d.capacity_gb} GB ` : ''}${label}`}
+                            links={buildStorageDriveResearchLinks(d)}
+                            onEditLinks={
+                              onEditPartLinks
+                                ? () =>
+                                    onEditPartLinks({
+                                      kind: 'storage_drive',
+                                      rigName: rig.name,
+                                      drive: d,
+                                    })
+                                : undefined
+                            }
+                          />
                           {d.form_factor ? (
                             <span className="rounded bg-slate-800 px-1 py-0.5 font-mono text-[10px] text-slate-300">
                               {d.form_factor}
@@ -1309,11 +1458,35 @@ export function DetailedComparePanel({
               if (rig.psu_wattage === null && !rig.psu_brand) {
                 return <span className="text-slate-600">—</span>;
               }
+              const psuLabel = [
+                rig.psu_wattage !== null ? `${rig.psu_wattage}W` : null,
+                rig.psu_brand,
+              ]
+                .filter(Boolean)
+                .join(' ');
               return (
-                <span className="font-mono text-slate-200">
-                  {rig.psu_wattage !== null ? `${rig.psu_wattage}W ` : ''}
-                  {rig.psu_brand ?? ''}
-                </span>
+                <SpecLink
+                  compact
+                  label={psuLabel}
+                  links={buildPsuResearchLinks(
+                    rig.psu_brand,
+                    rig.psu_wattage,
+                    rig.part_spec_links?.psu,
+                  )}
+                  onEditLinks={
+                    onEditPartLinks
+                      ? () =>
+                          onEditPartLinks({
+                            kind: 'computer_slot',
+                            computerId: rig.id,
+                            rigName: rig.name,
+                            slot: 'psu',
+                            partLabel: psuLabel,
+                            currentMap: rig.part_spec_links,
+                          })
+                      : undefined
+                  }
+                />
               );
             },
           },
@@ -1415,9 +1588,36 @@ export function DetailedComparePanel({
               if (!name && !details) {
                 return <span className="text-slate-600">—</span>;
               }
+              const wifiLinks = buildWifiResearchLinks(
+                rig.wifi_brand,
+                rig.wifi_product,
+                rig.wifi_model,
+                rig.part_spec_links?.wifi,
+              );
               return (
                 <div className="space-y-0.5">
-                  {name ? <div className="text-slate-200">{name}</div> : null}
+                  {name || wifiLinks.length > 0 ? (
+                    <div>
+                      <SpecLink
+                        compact
+                        label={name || 'Wi-Fi Adapter'}
+                        links={wifiLinks}
+                        onEditLinks={
+                          onEditPartLinks
+                            ? () =>
+                                onEditPartLinks({
+                                  kind: 'computer_slot',
+                                  computerId: rig.id,
+                                  rigName: rig.name,
+                                  slot: 'wifi',
+                                  partLabel: name || 'Wi-Fi Adapter',
+                                  currentMap: rig.part_spec_links,
+                                })
+                            : undefined
+                        }
+                      />
+                    </div>
+                  ) : null}
                   {details ? (
                     <p className="font-mono text-[11px] text-slate-400">
                       {details}
@@ -1450,7 +1650,7 @@ export function DetailedComparePanel({
         rows: benchmarkRows,
       },
     ];
-  }, [availableSuites, fleetStandings, latestBenchmarksByRigId]);
+  }, [availableSuites, fleetStandings, latestBenchmarksByRigId, onEditPartLinks]);
 
   const { evaluatedSections, totalPopulatedRowCount, diffRowCount } = useMemo(() => {
     if (displayedRigs.length === 0) {

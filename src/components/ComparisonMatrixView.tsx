@@ -21,6 +21,7 @@ import {
   getRankBadgeClasses,
   type RigFleetStanding,
 } from '../lib/scoring';
+import { buildCpuResearchLinks, buildGpuResearchLinks } from '../lib/specLinks';
 import type {
   Benchmark,
   ComputerWithRelations,
@@ -28,6 +29,7 @@ import type {
 } from '../types/database';
 import { DetailedComparePanel } from './DetailedComparePanel';
 import { DirectXBadge } from './DirectXBadge';
+import type { PartLinksEditTarget } from './PartLinksModal';
 import { SpecLink } from './SpecLink';
 
 function MatrixScoreCell({
@@ -65,6 +67,7 @@ interface ComparisonMatrixViewProps {
   ) => void;
   onSelectComputer: (rig: ComputerWithRelations) => void;
   onNotify: (message: string) => void;
+  onEditPartLinks?: (target: PartLinksEditTarget) => void;
 }
 
 type SortKey =
@@ -93,6 +96,7 @@ export function ComparisonMatrixView({
   onChangeCompareState,
   onSelectComputer,
   onNotify,
+  onEditPartLinks,
 }: ComparisonMatrixViewProps) {
   const [typeFilter, setTypeFilter] = useState<'All' | DeviceType>('All');
   const [search, setSearch] = useState('');
@@ -300,6 +304,7 @@ export function ComparisonMatrixView({
         onChangeCompareState={onChangeCompareState}
         onSelectComputer={onSelectComputer}
         onNotify={onNotify}
+        onEditPartLinks={onEditPartLinks}
       />
 
       {/* Collapsible Fleet Selector Matrix */}
@@ -524,13 +529,23 @@ export function ComparisonMatrixView({
                           <td className="px-3 py-2.5 whitespace-nowrap">
                             {rig.cpu ? (
                               <SpecLink
+                                compact
                                 label={`${rig.cpu.brand} ${rig.cpu.name}`}
                                 prefix={
                                   rig.cpu_count > 1
                                     ? `${rig.cpu_count}x`
                                     : undefined
                                 }
-                                specUrl={rig.cpu.spec_url}
+                                links={buildCpuResearchLinks(rig.cpu)}
+                                onEditLinks={
+                                  onEditPartLinks
+                                    ? () =>
+                                        onEditPartLinks({
+                                          kind: 'cpu',
+                                          cpu: rig.cpu!,
+                                        })
+                                    : undefined
+                                }
                               />
                             ) : (
                               <span className="text-slate-500">—</span>
@@ -570,14 +585,38 @@ export function ComparisonMatrixView({
                           <td className="px-3 py-2.5 whitespace-nowrap">
                             {rig.gpu ? (
                               <SpecLink
+                                compact
                                 label={`${rig.gpu.brand} ${rig.gpu.name}`}
-                                specUrl={rig.gpu.spec_url}
+                                links={buildGpuResearchLinks(rig.gpu, {
+                                  manufacturer: rig.gpu_aib_manufacturer,
+                                  model: rig.gpu_aib_model,
+                                  savedEntry: rig.part_spec_links?.gpu_aib,
+                                })}
+                                onEditLinks={
+                                  onEditPartLinks
+                                    ? () =>
+                                        onEditPartLinks({
+                                          kind: 'gpu',
+                                          gpu: rig.gpu!,
+                                        })
+                                    : undefined
+                                }
                               />
                             ) : rig.igpu ? (
                               <SpecLink
+                                compact
                                 label={`${rig.igpu.brand} ${rig.igpu.name}`}
                                 prefix="iGPU"
-                                specUrl={rig.igpu.spec_url}
+                                links={buildGpuResearchLinks(rig.igpu)}
+                                onEditLinks={
+                                  onEditPartLinks
+                                    ? () =>
+                                        onEditPartLinks({
+                                          kind: 'gpu',
+                                          gpu: rig.igpu!,
+                                        })
+                                    : undefined
+                                }
                               />
                             ) : (
                               <span className="text-slate-500">—</span>

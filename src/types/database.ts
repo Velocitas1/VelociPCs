@@ -8,6 +8,28 @@ export type CompatibilityStatus =
   | 'blocked_ram'
   | 'unknown';
 
+export interface SpecLinkItem {
+  label: string;
+  url: string;
+}
+
+export type ComputerPartLinkSlot =
+  | 'gpu_aib'
+  | 'motherboard'
+  | 'laptop'
+  | 'wifi'
+  | 'psu'
+  | 'ram';
+
+export interface PartSpecLinkEntry {
+  spec_url?: string | null;
+  links?: SpecLinkItem[];
+}
+
+export type PartSpecLinksMap = Partial<
+  Record<ComputerPartLinkSlot, PartSpecLinkEntry>
+>;
+
 export interface Cpu {
   id: number;
   name: string;
@@ -31,6 +53,7 @@ export interface Cpu {
   score_updated_at: string | null;
   is_mobile: boolean;
   spec_url: string | null;
+  spec_links: SpecLinkItem[];
   created_at: string;
   updated_at: string;
 }
@@ -54,6 +77,7 @@ export interface Gpu {
   score_updated_at: string | null;
   is_mobile: boolean;
   spec_url: string | null;
+  spec_links: SpecLinkItem[];
   created_at: string;
   updated_at: string;
 }
@@ -71,6 +95,8 @@ export interface StorageDrive {
   write_mb_s: number | null;
   rank: number | null;
   is_primary: boolean;
+  spec_url: string | null;
+  spec_links: SpecLinkItem[];
   created_at: string;
   updated_at: string;
 }
@@ -134,6 +160,7 @@ export interface Computer {
   wifi_standard: string | null;
   bluetooth_version: string | null;
   wifi_form_factor: string | null;
+  part_spec_links: PartSpecLinksMap;
   created_at: string;
   updated_at: string;
 }

@@ -1,20 +1,56 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { Plus, Trash2, X } from 'lucide-react';
+import {
+  ChevronDown,
+  ChevronRight,
+  Link2,
+  Plus,
+  Trash2,
+  X,
+} from 'lucide-react';
 import {
   computeFleetRankings,
   formatPassMark,
   formatRankBadge,
   getCompositeTooltip,
 } from '../lib/scoring';
+import { COMPUTER_SLOT_META, parseHttpUrl } from '../lib/specLinks';
 import type {
   BuildStatus,
+  ComputerPartLinkSlot,
   ComputerWithRelations,
   Cpu,
   DeviceType,
   Gpu,
+  PartSpecLinksMap,
+  SpecLinkItem,
 } from '../types/database';
 import type { ComputerUpsertPayload, DriveDraft } from '../hooks/useInventory';
 import { PartCombobox } from './PartCombobox';
+
+type SlotDraftMap = Record<
+  ComputerPartLinkSlot,
+  { specUrl: string; links: Array<{ label: string; url: string }> }
+>;
+
+function createEmptySlotDrafts(existing?: PartSpecLinksMap): SlotDraftMap {
+  const slots: ComputerPartLinkSlot[] = [
+    'gpu_aib',
+    'motherboard',
+    'laptop',
+    'wifi',
+    'psu',
+    'ram',
+  ];
+  const out = {} as SlotDraftMap;
+  for (const slot of slots) {
+    const entry = existing?.[slot];
+    out[slot] = {
+      specUrl: entry?.spec_url ?? '',
+      links: (entry?.links ?? []).map((l) => ({ ...l })),
+    };
+  }
+  return out;
+}
 
 interface ComputerFormModalProps {
   open: boolean;
@@ -104,12 +140,21 @@ export function ComputerFormModal({
   const [bluetooth, setBluetooth] = useState('');
 
   const [drives, setDrives] = useState<DriveDraft[]>([]);
+  const [expandedDriveLinks, setExpandedDriveLinks] = useState<
+    Record<number, boolean>
+  >({});
+  const [partSpecLinks, setPartSpecLinks] = useState<SlotDraftMap>(() =>
+    createEmptySlotDrafts(),
+  );
+  const [linksSectionOpen, setLinksSectionOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) return;
     setError(null);
+    setLinksSectionOpen(false);
+    setExpandedDriveLinks({});
     if (editingRig) {
       setName(editingRig.name);
       setDeviceType(editingRig.device_type);
@@ -156,6 +201,7 @@ export function ComputerFormModal({
       setWifiModel(editingRig.wifi_model ?? '');
       setWifiStandard(editingRig.wifi_standard ?? '');
       setBluetooth(editingRig.bluetooth_version ?? '');
+      setPartSpecLinks(createEmptySlotDrafts(editingRig.part_spec_links));
       setDrives(
         editingRig.storage_drives.map((d) => ({
           id: d.id,
@@ -168,6 +214,8 @@ export function ComputerFormModal({
           read_mb_s: d.read_mb_s,
           write_mb_s: d.write_mb_s,
           is_primary: d.is_primary,
+          spec_url: d.spec_url ?? null,
+          spec_links: (d.spec_links ?? []).map((l) => ({ ...l })),
         })),
       );
     } else {
@@ -204,6 +252,7 @@ export function ComputerFormModal({
       setWifiModel('');
       setWifiStandard('');
       setBluetooth('');
+      setPartSpecLinks(createEmptySlotDrafts());
       setDrives([
         {
           capacity_gb: null,
@@ -215,6 +264,8 @@ export function ComputerFormModal({
           read_mb_s: null,
           write_mb_s: null,
           is_primary: true,
+          spec_url: null,
+          spec_links: [],
         },
       ]);
     }
@@ -283,6 +334,7 @@ export function ComputerFormModal({
       wifi_standard: wifiStandard.trim() || null,
       bluetooth_version: bluetooth.trim() || null,
       wifi_form_factor: editingRig?.wifi_form_factor ?? null,
+      part_spec_links: editingRig?.part_spec_links ?? {},
       created_at: editingRig?.created_at ?? '',
       updated_at: editingRig?.updated_at ?? '',
       cpu: selectedCpu,
@@ -338,12 +390,84 @@ export function ComputerFormModal({
   if (!open) return null;
 
   const isLaptop = deviceType === 'Laptop';
+  const relevantLinkSlots: ComputerPartLinkSlot[] = isLaptop
+    ? ['laptop', 'wifi', 'ram', 'gpu_aib']
+    : ['gpu_aib', 'motherboard', 'psu', 'ram'];
+  const populatedLinkSlotsCount = relevantLinkSlots.filter((slot) => {
+    const entry = partSpecLinks[slot];
+    return Boolean(
+      entry?.specUrl.trim() ||
+        entry?.links.some((l) => l.label.trim() || l.url.trim()),
+    );
+  }).length;
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (!name.trim()) {
       setError('Rig name is required.');
       return;
+    }
+
+    const sanitizedPartSpecLinks: PartSpecLinksMap = {};
+    for (const slot of Object.keys(partSpecLinks) as ComputerPartLinkSlot[]) {
+      const draft = partSpecLinks[slot];
+      const slotLabel = COMPUTER_SLOT_META[slot].label;
+      const parsedPrimary = parseHttpUrl(draft.specUrl);
+      if (!parsedPrimary.valid) {
+        setError(`${slotLabel} Primary URL: ${parsedPrimary.error}`);
+        setLinksSectionOpen(true);
+        return;
+      }
+
+      const cleanedExtra: SpecLinkItem[] = [];
+      const seen = new Set<string>();
+      if (parsedPrimary.normalizedUrl) {
+        seen.add(parsedPrimary.normalizedUrl);
+      }
+      for (let i = 0; i < draft.links.length; i += 1) {
+        const row = draft.links[i];
+        const lbl = row.label.trim();
+        const url = row.url.trim();
+        if (!lbl && !url) continue;
+        if (!lbl) {
+          setError(`${slotLabel} extra link #${i + 1} needs a label.`);
+          setLinksSectionOpen(true);
+          return;
+        }
+        const parsedExtra = parseHttpUrl(url);
+        if (!parsedExtra.valid || !parsedExtra.normalizedUrl) {
+          setError(`${slotLabel} link "${lbl}": ${parsedExtra.error ?? 'URL is required.'}`);
+          setLinksSectionOpen(true);
+          return;
+        }
+        if (seen.has(parsedExtra.normalizedUrl)) continue;
+        seen.add(parsedExtra.normalizedUrl);
+        cleanedExtra.push({ label: lbl, url: parsedExtra.normalizedUrl });
+      }
+
+      if (parsedPrimary.normalizedUrl || cleanedExtra.length > 0) {
+        sanitizedPartSpecLinks[slot] = {
+          ...(parsedPrimary.normalizedUrl
+            ? { spec_url: parsedPrimary.normalizedUrl }
+            : {}),
+          ...(cleanedExtra.length > 0 ? { links: cleanedExtra } : {}),
+        };
+      }
+    }
+
+    const normalizedDrives: DriveDraft[] = [];
+    for (let idx = 0; idx < drives.length; idx += 1) {
+      const d = drives[idx];
+      const parsedDriveUrl = parseHttpUrl(d.spec_url ?? '');
+      if (!parsedDriveUrl.valid) {
+        setError(`Storage Drive #${idx + 1} Spec URL: ${parsedDriveUrl.error}`);
+        setExpandedDriveLinks((prev) => ({ ...prev, [idx]: true }));
+        return;
+      }
+      normalizedDrives.push({
+        ...d,
+        spec_url: parsedDriveUrl.normalizedUrl,
+      });
     }
 
     setSaving(true);
@@ -393,8 +517,9 @@ export function ComputerFormModal({
           wifi_standard: wifiStandard.trim() || null,
           bluetooth_version: bluetooth.trim() || null,
           wifi_form_factor: editingRig?.wifi_form_factor ?? null,
+          part_spec_links: sanitizedPartSpecLinks,
         },
-        drives,
+        normalizedDrives,
         editingRig?.id,
       );
       onClose();
@@ -876,6 +1001,8 @@ export function ComputerFormModal({
                       read_mb_s: null,
                       write_mb_s: null,
                       is_primary: prev.length === 0,
+                      spec_url: null,
+                      spec_links: [],
                     },
                   ])
                 }
@@ -886,78 +1013,263 @@ export function ComputerFormModal({
               </button>
             </div>
 
-            {drives.map((d, idx) => (
-              <div
-                key={idx}
-                className="grid items-center gap-2 sm:grid-cols-12"
-              >
-                <input
-                  type="number"
-                  placeholder="GB"
-                  value={d.capacity_gb ?? ''}
-                  onChange={(e) => {
-                    const val = intOrNull(e.target.value);
-                    setDrives((prev) =>
-                      prev.map((row, i) =>
-                        i === idx ? { ...row, capacity_gb: val } : row,
-                      ),
-                    );
-                  }}
-                  className="rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-white sm:col-span-2"
-                />
-                <input
-                  type="text"
-                  placeholder="Form Factor"
-                  value={d.form_factor ?? ''}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setDrives((prev) =>
-                      prev.map((row, i) =>
-                        i === idx ? { ...row, form_factor: val } : row,
-                      ),
-                    );
-                  }}
-                  className="rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-white sm:col-span-3"
-                />
-                <input
-                  type="text"
-                  placeholder="Brand"
-                  value={d.brand ?? ''}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setDrives((prev) =>
-                      prev.map((row, i) =>
-                        i === idx ? { ...row, brand: val } : row,
-                      ),
-                    );
-                  }}
-                  className="rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-white sm:col-span-3"
-                />
-                <input
-                  type="text"
-                  placeholder="Model"
-                  value={d.model ?? ''}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setDrives((prev) =>
-                      prev.map((row, i) =>
-                        i === idx ? { ...row, model: val } : row,
-                      ),
-                    );
-                  }}
-                  className="rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-white sm:col-span-3"
-                />
-                <button
-                  type="button"
-                  onClick={() =>
-                    setDrives((prev) => prev.filter((_, i) => i !== idx))
-                  }
-                  className="flex justify-center rounded-lg p-1.5 text-slate-500 hover:bg-rose-500/15 hover:text-rose-300 sm:col-span-1"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
+            {drives.map((d, idx) => {
+              const hasDriveLink = Boolean(
+                d.spec_url?.trim() || (d.spec_links?.length ?? 0) > 0,
+              );
+              const linkOpen = Boolean(expandedDriveLinks[idx]);
+              return (
+                <div key={idx} className="space-y-1.5">
+                  <div className="grid items-center gap-2 sm:grid-cols-12">
+                    <input
+                      type="number"
+                      placeholder="GB"
+                      value={d.capacity_gb ?? ''}
+                      onChange={(e) => {
+                        const val = intOrNull(e.target.value);
+                        setDrives((prev) =>
+                          prev.map((row, i) =>
+                            i === idx ? { ...row, capacity_gb: val } : row,
+                          ),
+                        );
+                      }}
+                      className="rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-white sm:col-span-2"
+                    />
+                    <input
+                      type="text"
+                      placeholder="Form Factor"
+                      value={d.form_factor ?? ''}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setDrives((prev) =>
+                          prev.map((row, i) =>
+                            i === idx ? { ...row, form_factor: val } : row,
+                          ),
+                        );
+                      }}
+                      className="rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-white sm:col-span-2"
+                    />
+                    <input
+                      type="text"
+                      placeholder="Brand"
+                      value={d.brand ?? ''}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setDrives((prev) =>
+                          prev.map((row, i) =>
+                            i === idx ? { ...row, brand: val } : row,
+                          ),
+                        );
+                      }}
+                      className="rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-white sm:col-span-3"
+                    />
+                    <input
+                      type="text"
+                      placeholder="Model"
+                      value={d.model ?? ''}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setDrives((prev) =>
+                          prev.map((row, i) =>
+                            i === idx ? { ...row, model: val } : row,
+                          ),
+                        );
+                      }}
+                      className="rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-white sm:col-span-3"
+                    />
+                    <div className="flex items-center justify-end gap-1 sm:col-span-2">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setExpandedDriveLinks((prev) => ({
+                            ...prev,
+                            [idx]: !prev[idx],
+                          }))
+                        }
+                        title={
+                          hasDriveLink
+                            ? 'Edit drive datasheet URL'
+                            : 'Add drive datasheet URL'
+                        }
+                        className={`rounded-lg border p-1.5 transition ${
+                          hasDriveLink
+                            ? 'border-cyan-500/40 bg-cyan-500/15 text-cyan-300'
+                            : 'border-slate-700 bg-slate-950 text-slate-400 hover:border-slate-500 hover:text-white'
+                        }`}
+                      >
+                        <Link2 className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setDrives((prev) => prev.filter((_, i) => i !== idx))
+                        }
+                        className="rounded-lg p-1.5 text-slate-500 hover:bg-rose-500/15 hover:text-rose-300"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+                  {linkOpen ? (
+                    <div className="flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-900/70 px-2.5 py-2">
+                      <span className="shrink-0 text-[11px] text-slate-400">
+                        Spec URL:
+                      </span>
+                      <input
+                        type="url"
+                        value={d.spec_url ?? ''}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setDrives((prev) =>
+                            prev.map((row, i) =>
+                              i === idx ? { ...row, spec_url: val } : row,
+                            ),
+                          );
+                        }}
+                        placeholder="https://... (manufacturer datasheet or TechPowerUp SSD DB)"
+                        className="w-full rounded border border-slate-700 bg-slate-950 px-2.5 py-1 font-mono text-[11px] text-cyan-200"
+                      />
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Spec & Research Links (Optional) */}
+          <div className="rounded-xl border border-slate-800 bg-slate-950/50">
+            <button
+              type="button"
+              onClick={() => setLinksSectionOpen((v) => !v)}
+              aria-expanded={linksSectionOpen}
+              className="flex w-full items-center justify-between px-4 py-3 text-left"
+            >
+              <span className="inline-flex items-center gap-2 font-semibold text-slate-300 uppercase">
+                {linksSectionOpen ? (
+                  <ChevronDown className="h-4 w-4 text-slate-400" />
+                ) : (
+                  <ChevronRight className="h-4 w-4 text-slate-400" />
+                )}
+                <Link2 className="h-3.5 w-3.5 text-cyan-400" />
+                Spec &amp; Research Links (Optional)
+              </span>
+              <span className="rounded-full border border-slate-700 bg-slate-900 px-2 py-0.5 font-mono text-[11px] text-slate-300">
+                {populatedLinkSlotsCount} configured
+              </span>
+            </button>
+
+            {linksSectionOpen ? (
+              <div className="space-y-3 border-t border-slate-800 p-4">
+                {relevantLinkSlots.map((slot) => {
+                  const meta = COMPUTER_SLOT_META[slot];
+                  const draft = partSpecLinks[slot];
+                  return (
+                    <div
+                      key={slot}
+                      className="space-y-2 rounded-lg border border-slate-800/80 bg-slate-900/50 p-3"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-semibold text-slate-200">
+                          {meta.label}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setPartSpecLinks((prev) => ({
+                              ...prev,
+                              [slot]: {
+                                ...prev[slot],
+                                links: [
+                                  ...prev[slot].links,
+                                  { label: '', url: '' },
+                                ],
+                              },
+                            }))
+                          }
+                          className="inline-flex items-center gap-1 rounded border border-slate-700 bg-slate-950 px-2 py-0.5 text-[11px] text-slate-300 hover:border-cyan-500/50 hover:text-cyan-200"
+                        >
+                          <Plus className="h-3 w-3" />
+                          Extra Link
+                        </button>
+                      </div>
+                      <input
+                        type="url"
+                        value={draft.specUrl}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setPartSpecLinks((prev) => ({
+                            ...prev,
+                            [slot]: { ...prev[slot], specUrl: val },
+                          }));
+                        }}
+                        placeholder={meta.placeholder}
+                        className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-1.5 font-mono text-[11px] text-cyan-200"
+                      />
+                      {draft.links.map((extra, idx) => (
+                        <div
+                          key={idx}
+                          className="grid items-center gap-2 sm:grid-cols-12"
+                        >
+                          <input
+                            type="text"
+                            value={extra.label}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setPartSpecLinks((prev) => ({
+                                ...prev,
+                                [slot]: {
+                                  ...prev[slot],
+                                  links: prev[slot].links.map((item, i) =>
+                                    i === idx ? { ...item, label: val } : item,
+                                  ),
+                                },
+                              }));
+                            }}
+                            placeholder="Label"
+                            className="rounded border border-slate-700 bg-slate-950 px-2.5 py-1 text-[11px] text-white sm:col-span-4"
+                          />
+                          <input
+                            type="url"
+                            value={extra.url}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setPartSpecLinks((prev) => ({
+                                ...prev,
+                                [slot]: {
+                                  ...prev[slot],
+                                  links: prev[slot].links.map((item, i) =>
+                                    i === idx ? { ...item, url: val } : item,
+                                  ),
+                                },
+                              }));
+                            }}
+                            placeholder="https://..."
+                            className="rounded border border-slate-700 bg-slate-950 px-2.5 py-1 font-mono text-[11px] text-cyan-200 sm:col-span-7"
+                          />
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setPartSpecLinks((prev) => ({
+                                ...prev,
+                                [slot]: {
+                                  ...prev[slot],
+                                  links: prev[slot].links.filter(
+                                    (_, i) => i !== idx,
+                                  ),
+                                },
+                              }))
+                            }
+                            className="flex justify-center rounded p-1 text-slate-500 hover:bg-rose-500/15 hover:text-rose-300 sm:col-span-1"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })}
               </div>
-            ))}
+            ) : null}
           </div>
 
           <div>

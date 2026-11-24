@@ -5,6 +5,7 @@ import {
   type ParsedGpu,
   type ParsedImportPreview,
 } from './csvParserCore.mjs';
+import { isSearchFallbackUrl } from './specLinks';
 import type { Cpu, DeviceType, Gpu } from '../types/database';
 
 export { parseTransposedInventoryCsv, type ParsedImportPreview };
@@ -61,15 +62,26 @@ export async function importParsedRigsToSupabase(
   if (gpuErr) throw gpuErr;
 
   const cpuIdByKey = new Map<string, number>();
+  const cpuSpecUrlById = new Map<number, string | null>();
   for (const c of (existingCpus ?? []) as Cpu[]) {
     cpuIdByKey.set(`${c.brand.toLowerCase()}|${c.name.toLowerCase()}`, c.id);
+    cpuSpecUrlById.set(c.id, c.spec_url);
   }
 
   let cpusSynced = 0;
   for (const [key, cpu] of cpuMap.entries()) {
     const existingId = cpuIdByKey.get(key);
     if (existingId) {
-      const { error } = await supabase.from('cpus').update(cpu).eq('id', existingId);
+      const existingUrl = cpuSpecUrlById.get(existingId);
+      const keepExistingDirectUrl =
+        Boolean(existingUrl) && !isSearchFallbackUrl(existingUrl!);
+      const updatePayload = keepExistingDirectUrl
+        ? (({ spec_url: _drop, ...rest }) => rest)(cpu)
+        : cpu;
+      const { error } = await supabase
+        .from('cpus')
+        .update(updatePayload)
+        .eq('id', existingId);
       if (error) throw error;
       cpusSynced += 1;
     } else {
@@ -81,15 +93,26 @@ export async function importParsedRigsToSupabase(
   }
 
   const gpuIdByKey = new Map<string, number>();
+  const gpuSpecUrlById = new Map<number, string | null>();
   for (const g of (existingGpus ?? []) as Gpu[]) {
     gpuIdByKey.set(`${g.brand.toLowerCase()}|${g.name.toLowerCase()}|${g.is_mobile}`, g.id);
+    gpuSpecUrlById.set(g.id, g.spec_url);
   }
 
   let gpusSynced = 0;
   for (const [key, gpu] of gpuMap.entries()) {
     const existingId = gpuIdByKey.get(key);
     if (existingId) {
-      const { error } = await supabase.from('gpus').update(gpu).eq('id', existingId);
+      const existingUrl = gpuSpecUrlById.get(existingId);
+      const keepExistingDirectUrl =
+        Boolean(existingUrl) && !isSearchFallbackUrl(existingUrl!);
+      const updatePayload = keepExistingDirectUrl
+        ? (({ spec_url: _drop, ...rest }) => rest)(gpu)
+        : gpu;
+      const { error } = await supabase
+        .from('gpus')
+        .update(updatePayload)
+        .eq('id', existingId);
       if (error) throw error;
       gpusSynced += 1;
     } else {
