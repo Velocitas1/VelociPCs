@@ -49,8 +49,8 @@ Foundational parts-tracking architecture and automated hardware import to replac
 - [x] **HWiNFO XML Hardware Report Importer:**
   - Build a client-side `DOMParser` importer for `HWiNFO32` / `HWiNFO64` XML reports (`Save Report -> XML` or CLI `-r`) covering Win 98 → Win 11 rigs (accessible in the Import tab and directly from `src/components/ComputerDetailModal.tsx`; supports direct owner login on modern rigs or USB/NAS XML file upload from retro rigs, while the 2 Linux machines remain manual).
   - Include fuzzy matching against existing `cpus`/`gpus`/variants (including PCI Subsystem IDs for AIB GPUs), an interactive diff/merge preview modal that preserves manual fields software cannot detect (PSU, build date, notes), and optional swap-to-spare updates when hardware changes are detected (zero RLS changes needed).
-- [ ] **AI Export Payload Enrichment:**
-  - Update `src/lib/aiExport.ts` and `src/components/AiExportModal.tsx` to include spare parts inventory, integrated GPUs (`igpu`), and PSU connector flags (3DMark `result_url` links are already included) so exported JSON/Markdown gives Gemini complete context for upgrade advice.
+- [x] **AI Export Payload Enrichment:**
+  - Update `src/lib/aiExport.ts` and `src/components/AiExportModal.tsx` to include scoped spare parts inventory across all 9 spare-tracked tables (`installed_count`, `spare_count`, `total_owned`), enriched integrated GPUs (`igpu` DirectX/VRAM/TDP/rank), structured PSUs with connector flags (`has_8pin_cpu`, `has_6pin_pcie`, `power_adapter_notes`), full Phase 3 rig part profiles (`gpu_card`, `motherboard`, `ram_kit`, `pc_case`, `cooler`, `wifi`, drive speeds/NAND, rig `notes`), a live `Spare Parts` toggle, and payload size / estimated token readouts in exported JSON/Markdown (3DMark `result_url` links are already included).
 
 ---
 

@@ -504,6 +504,7 @@ export function App() {
         open={aiExportOpen}
         computers={inventory.computers}
         fleetStandings={fleetStandings}
+        partsCatalog={catalogContext}
         onClose={() => setAiExportOpen(false)}
       />
 

@@ -1,6 +1,11 @@
 import { useMemo, useState } from 'react';
-import { Check, Copy, Download, FileCode2, FileText, X } from 'lucide-react';
-import { buildAiExportJson, buildAiExportMarkdown } from '../lib/aiExport';
+import { Check, Copy, Download, FileCode2, FileText, Package, X } from 'lucide-react';
+import {
+  buildAiExportJson,
+  buildAiExportMarkdown,
+  buildSparePartsExport,
+  type AiExportSpareCatalog,
+} from '../lib/aiExport';
 import type { RigFleetStanding } from '../lib/scoring';
 import type { ComputerWithRelations, DeviceType } from '../types/database';
 
@@ -8,6 +13,7 @@ interface AiExportModalProps {
   open: boolean;
   computers: ComputerWithRelations[];
   fleetStandings: Map<number, RigFleetStanding>;
+  partsCatalog: AiExportSpareCatalog;
   onClose: () => void;
 }
 
@@ -15,10 +21,12 @@ export function AiExportModal({
   open,
   computers,
   fleetStandings,
+  partsCatalog,
   onClose,
 }: AiExportModalProps) {
   const [format, setFormat] = useState<'markdown' | 'json'>('markdown');
   const [filter, setFilter] = useState<'All' | DeviceType>('All');
+  const [includeSpareParts, setIncludeSpareParts] = useState(true);
   const [copied, setCopied] = useState(false);
 
   const scopedRigs = useMemo(
@@ -29,13 +37,41 @@ export function AiExportModal({
     [computers, filter],
   );
 
-  const output = useMemo(
-    () =>
-      format === 'markdown'
-        ? buildAiExportMarkdown(scopedRigs, fleetStandings)
-        : buildAiExportJson(scopedRigs, fleetStandings),
-    [format, scopedRigs, fleetStandings],
+  const spareSummary = useMemo(
+    () => buildSparePartsExport(partsCatalog, computers, filter),
+    [partsCatalog, computers, filter],
   );
+
+  const output = useMemo(() => {
+    const exportOptions = {
+      includeSpareParts,
+      deviceScope: filter,
+      allComputers: computers,
+      partsCatalog,
+    };
+    return format === 'markdown'
+      ? buildAiExportMarkdown(scopedRigs, fleetStandings, exportOptions)
+      : buildAiExportJson(scopedRigs, fleetStandings, exportOptions);
+  }, [
+    format,
+    scopedRigs,
+    fleetStandings,
+    includeSpareParts,
+    filter,
+    computers,
+    partsCatalog,
+  ]);
+
+  const payloadStats = useMemo(() => {
+    const bytes = new Blob([output]).size;
+    const kb = (bytes / 1024).toFixed(1);
+    const estTokens = Math.ceil(output.length / 4);
+    return {
+      chars: output.length.toLocaleString(),
+      kb,
+      estTokens: estTokens.toLocaleString(),
+    };
+  }, [output]);
 
   if (!open) return null;
 
@@ -67,7 +103,7 @@ export function AiExportModal({
               Export Inventory for AI Assistant
             </h2>
             <p className="text-xs text-slate-400">
-              Share rigs, PassMark scores, Fleet Ranks, DirectX levels, and 3DMark scores in one paste for upgrade or game compatibility advice
+              Share rigs, spare parts, iGPUs, PSU connectors, PassMark/Fleet Ranks, DirectX levels, and 3DMark scores in one paste for upgrade or compatibility advice
             </p>
           </div>
           <button
@@ -115,6 +151,20 @@ export function AiExportModal({
               <option value="Desktop">Desktops Only</option>
               <option value="Laptop">Laptops Only</option>
             </select>
+
+            <button
+              type="button"
+              aria-pressed={includeSpareParts}
+              onClick={() => setIncludeSpareParts((prev) => !prev)}
+              className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                includeSpareParts
+                  ? 'border-cyan-500/50 bg-cyan-500/15 text-cyan-200'
+                  : 'border-slate-700 bg-slate-900 text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Package className="h-3.5 w-3.5" />
+              Spare Parts ({spareSummary.total_spare_units})
+            </button>
           </div>
 
           <div className="flex items-center gap-2">
@@ -150,6 +200,34 @@ export function AiExportModal({
           <pre className="rounded-xl border border-slate-800 bg-slate-950 p-4 font-mono text-xs leading-relaxed whitespace-pre-wrap text-slate-200">
             {output}
           </pre>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-800 bg-slate-950/60 px-5 py-2.5 text-[11px] text-slate-400">
+          <div className="flex flex-wrap items-center gap-2">
+            <span>
+              {scopedRigs.length} {scopedRigs.length === 1 ? 'rig' : 'rigs'}
+            </span>
+            {includeSpareParts ? (
+              <>
+                <span className="text-slate-600">·</span>
+                <span>
+                  {spareSummary.total_spare_units} spare{' '}
+                  {spareSummary.total_spare_units === 1 ? 'unit' : 'units'} (
+                  {spareSummary.total_spare_models}{' '}
+                  {spareSummary.total_spare_models === 1 ? 'model' : 'models'})
+                </span>
+              </>
+            ) : (
+              <>
+                <span className="text-slate-600">·</span>
+                <span>Spare parts excluded</span>
+              </>
+            )}
+          </div>
+          <div className="font-mono text-slate-300">
+            {payloadStats.chars} chars · {payloadStats.kb} KB · ~
+            {payloadStats.estTokens} tokens
+          </div>
         </div>
       </div>
     </div>
