@@ -6,12 +6,17 @@ import {
   sanitizePartSpecLinks,
   sanitizeSpecLinks,
 } from '../lib/specLinks';
+import {
+  evaluateRigGameCompatibility,
+  parseSteamPcRequirements,
+} from '../lib/steamCompatibility';
 import { isSupabaseConfigured, supabase } from '../lib/supabase';
 import type {
   Benchmark,
   BuildGameCompatibility,
   CatalogPart,
   CatalogPartCategory,
+  CompatibilityStatus,
   Computer,
   ComputerPartLinkSlot,
   ComputerWithRelations,
@@ -28,6 +33,7 @@ import type {
   SpareTableName,
   SpecLinkItem,
   SteamGame,
+  SteamRequirementsStatus,
   StorageDriveModel,
   WifiCard,
 } from '../types/database';
@@ -52,6 +58,39 @@ export type ComputerUpsertPayload = Omit<
   Computer,
   'id' | 'created_at' | 'updated_at'
 >;
+
+export interface SteamGameOverridePatch {
+  min_directx: string | null;
+  rec_directx: string | null;
+  min_vram_gb: number | null;
+  rec_vram_gb: number | null;
+  min_ram_gb: number | null;
+  rec_ram_gb: number | null;
+  storage_gb: number | null;
+  override_notes: string | null;
+}
+
+async function fetchAllRows<T>(
+  fetchPage: (
+    from: number,
+    to: number,
+  ) => PromiseLike<{ data: T[] | null; error: unknown }>,
+): Promise<T[]> {
+  const pageSize = 1000;
+  const all: T[] = [];
+  let from = 0;
+
+  while (true) {
+    const { data, error } = await fetchPage(from, from + pageSize - 1);
+    if (error) throw error;
+    const rows = data ?? [];
+    all.push(...rows);
+    if (rows.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return all;
+}
 
 function normalizeLinksEntity<
   T extends { spec_url: string | null; spec_links: SpecLinkItem[] },
@@ -127,8 +166,6 @@ export function useInventory() {
         caseRes,
         coolerRes,
         wifiRes,
-        steamRes,
-        compatRes,
       ] = await Promise.all([
         supabase
           .from('computers')
@@ -201,11 +238,6 @@ export function useInventory() {
           .select('*')
           .order('brand', { ascending: true })
           .order('model', { ascending: true }),
-        supabase
-          .from('steam_library')
-          .select('*')
-          .order('title', { ascending: true }),
-        supabase.from('build_game_compatibility').select('*'),
       ]);
 
       const firstErr =
@@ -219,10 +251,26 @@ export function useInventory() {
         psuRes.error ||
         caseRes.error ||
         coolerRes.error ||
-        wifiRes.error ||
-        steamRes.error ||
-        compatRes.error;
+        wifiRes.error;
       if (firstErr) throw firstErr;
+
+      const [allSteamGames, allCompatRows] = await Promise.all([
+        fetchAllRows<SteamGame>((from, to) =>
+          supabase
+            .from('steam_library')
+            .select('*')
+            .order('playtime_minutes', { ascending: false })
+            .order('title', { ascending: true })
+            .range(from, to),
+        ),
+        fetchAllRows<BuildGameCompatibility>((from, to) =>
+          supabase
+            .from('build_game_compatibility')
+            .select('*')
+            .order('id', { ascending: true })
+            .range(from, to),
+        ),
+      ]);
 
       const normalizedComputers = (
         (compRes.data ?? []) as ComputerWithRelations[]
@@ -279,8 +327,8 @@ export function useInventory() {
       setWifiCards(
         ((wifiRes.data ?? []) as WifiCard[]).map(normalizeLinksEntity),
       );
-      setSteamGames((steamRes.data ?? []) as SteamGame[]);
-      setCompatibilityRows((compatRes.data ?? []) as BuildGameCompatibility[]);
+      setSteamGames(allSteamGames);
+      setCompatibilityRows(allCompatRows);
     } catch (err) {
       setError(formatSupabaseError(err, 'Failed to load inventory.'));
     } finally {
@@ -291,6 +339,96 @@ export function useInventory() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  const refreshSteamData = useCallback(async () => {
+    const [allSteamGames, allCompatRows] = await Promise.all([
+      fetchAllRows<SteamGame>((from, to) =>
+        supabase
+          .from('steam_library')
+          .select('*')
+          .order('playtime_minutes', { ascending: false })
+          .order('title', { ascending: true })
+          .range(from, to),
+      ),
+      fetchAllRows<BuildGameCompatibility>((from, to) =>
+        supabase
+          .from('build_game_compatibility')
+          .select('*')
+          .order('id', { ascending: true })
+          .range(from, to),
+      ),
+    ]);
+    setSteamGames(allSteamGames);
+    setCompatibilityRows(allCompatRows);
+  }, []);
+
+  const evaluateAndPersistForComputer = useCallback(
+    async (computerId: number) => {
+      const [compRes, games] = await Promise.all([
+        supabase
+          .from('computers')
+          .select(
+            `
+            *,
+            cpu:cpus!computers_cpu_id_fkey(*),
+            gpu:gpus!computers_gpu_id_fkey(*),
+            gpu_card:gpu_cards!computers_gpu_card_id_fkey(*, gpu:gpus!gpu_cards_gpu_id_fkey(*)),
+            igpu:gpus!computers_igpu_id_fkey(*),
+            motherboard:motherboards!computers_motherboard_id_fkey(*),
+            ram_kit:ram_kits!computers_ram_kit_id_fkey(*),
+            psu:psus!computers_psu_id_fkey(*),
+            pc_case:cases!computers_case_id_fkey(*),
+            cooler:coolers!computers_cooler_id_fkey(*),
+            wifi_card:wifi_cards!computers_wifi_card_id_fkey(*),
+            storage_drives(*, storage_drive_model:storage_drive_models!storage_drives_storage_drive_model_id_fkey(*)),
+            benchmarks(*)
+          `,
+          )
+          .eq('id', computerId)
+          .single(),
+        fetchAllRows<SteamGame>((from, to) =>
+          supabase
+            .from('steam_library')
+            .select('*')
+            .order('app_id', { ascending: true })
+            .range(from, to),
+        ),
+      ]);
+
+      if (compRes.error) throw compRes.error;
+      if (games.length === 0 || !compRes.data) return;
+
+      const rig = compRes.data as unknown as ComputerWithRelations;
+      const nowIso = new Date().toISOString();
+      const rows: Array<{
+        computer_id: number;
+        steam_app_id: number;
+        status: CompatibilityStatus;
+        blocking_reason: string | null;
+        evaluated_at: string;
+      }> = games.map((game) => {
+        const res = evaluateRigGameCompatibility(rig, game);
+        return {
+          computer_id: rig.id,
+          steam_app_id: game.app_id,
+          status: res.status,
+          blocking_reason: res.blocking_reason,
+          evaluated_at: nowIso,
+        };
+      });
+
+      const chunkSize = 500;
+      for (let i = 0; i < rows.length; i += chunkSize) {
+        const { error: upsertErr } = await supabase
+          .from('build_game_compatibility')
+          .upsert(rows.slice(i, i + chunkSize), {
+            onConflict: 'computer_id,steam_app_id',
+          });
+        if (upsertErr) throw upsertErr;
+      }
+    },
+    [],
+  );
 
   const saveComputer = useCallback(
     async (
@@ -370,10 +508,14 @@ export function useInventory() {
         }
       }
 
+      if (computerId) {
+        await evaluateAndPersistForComputer(computerId);
+      }
+
       await refresh();
       return computerId!;
     },
-    [refresh],
+    [evaluateAndPersistForComputer, refresh],
   );
 
   const deleteComputer = useCallback(
@@ -438,6 +580,14 @@ export function useInventory() {
           .select('*')
           .single();
         if (updErr) throw updErr;
+        if (steamGames.length > 0) {
+          const affected = computers.filter(
+            (c) => c.gpu_id === existingId || c.igpu_id === existingId,
+          );
+          for (const rig of affected) {
+            await evaluateAndPersistForComputer(rig.id);
+          }
+        }
         await refresh();
         return data as Gpu;
       }
@@ -450,7 +600,7 @@ export function useInventory() {
       await refresh();
       return data as Gpu;
     },
-    [refresh],
+    [computers, evaluateAndPersistForComputer, refresh, steamGames.length],
   );
 
   const deleteGpu = useCallback(
@@ -671,6 +821,147 @@ export function useInventory() {
     [refresh],
   );
 
+  const saveSteamGameOverride = useCallback(
+    async (appId: number, patch: SteamGameOverridePatch): Promise<void> => {
+      const hasAnyReq =
+        patch.min_directx !== null ||
+        patch.rec_directx !== null ||
+        patch.min_vram_gb !== null ||
+        patch.rec_vram_gb !== null ||
+        patch.min_ram_gb !== null ||
+        patch.rec_ram_gb !== null ||
+        patch.storage_gb !== null;
+
+      const reqStatus: SteamRequirementsStatus = hasAnyReq
+        ? 'parsed'
+        : 'missing';
+
+      const { data: updatedGame, error: updErr } = await supabase
+        .from('steam_library')
+        .update({
+          ...patch,
+          manual_override: true,
+          requirements_status: reqStatus,
+        })
+        .eq('app_id', appId)
+        .select('*')
+        .single();
+      if (updErr) throw updErr;
+
+      const game = updatedGame as SteamGame;
+      if (computers.length > 0) {
+        const nowIso = new Date().toISOString();
+        const rows = computers.map((rig) => {
+          const res = evaluateRigGameCompatibility(rig, game);
+          return {
+            computer_id: rig.id,
+            steam_app_id: game.app_id,
+            status: res.status,
+            blocking_reason: res.blocking_reason,
+            evaluated_at: nowIso,
+          };
+        });
+        const chunkSize = 500;
+        for (let i = 0; i < rows.length; i += chunkSize) {
+          const { error: compatErr } = await supabase
+            .from('build_game_compatibility')
+            .upsert(rows.slice(i, i + chunkSize), {
+              onConflict: 'computer_id,steam_app_id',
+            });
+          if (compatErr) throw compatErr;
+        }
+      }
+
+      await refreshSteamData();
+    },
+    [computers, refreshSteamData],
+  );
+
+  const resetSteamGameOverride = useCallback(
+    async (game: SteamGame): Promise<void> => {
+      const parsed = parseSteamPcRequirements(game.raw_requirements);
+      const reqStatus: SteamRequirementsStatus = parsed.hasAnyRequirement
+        ? 'parsed'
+        : 'missing';
+
+      const { data: updatedGame, error: updErr } = await supabase
+        .from('steam_library')
+        .update({
+          min_directx: parsed.min_directx,
+          rec_directx: parsed.rec_directx,
+          min_vram_gb: parsed.min_vram_gb,
+          rec_vram_gb: parsed.rec_vram_gb,
+          min_ram_gb: parsed.min_ram_gb,
+          rec_ram_gb: parsed.rec_ram_gb,
+          storage_gb: parsed.storage_gb,
+          manual_override: false,
+          override_notes: null,
+          requirements_status: reqStatus,
+        })
+        .eq('app_id', game.app_id)
+        .select('*')
+        .single();
+      if (updErr) throw updErr;
+
+      const nextGame = updatedGame as SteamGame;
+      if (computers.length > 0) {
+        const nowIso = new Date().toISOString();
+        const rows = computers.map((rig) => {
+          const res = evaluateRigGameCompatibility(rig, nextGame);
+          return {
+            computer_id: rig.id,
+            steam_app_id: nextGame.app_id,
+            status: res.status,
+            blocking_reason: res.blocking_reason,
+            evaluated_at: nowIso,
+          };
+        });
+        const chunkSize = 500;
+        for (let i = 0; i < rows.length; i += chunkSize) {
+          const { error: compatErr } = await supabase
+            .from('build_game_compatibility')
+            .upsert(rows.slice(i, i + chunkSize), {
+              onConflict: 'computer_id,steam_app_id',
+            });
+          if (compatErr) throw compatErr;
+        }
+      }
+
+      await refreshSteamData();
+    },
+    [computers, refreshSteamData],
+  );
+
+  const reevaluateAllSteamCompatibility = useCallback(async (): Promise<{
+    computersEvaluated: number;
+    gamesEvaluated: number;
+    rowsUpserted: number;
+  }> => {
+    const { data, error: fnErr } = await supabase.functions.invoke(
+      'sync-steam-library',
+      {
+        body: { action: 'evaluate_all' },
+      },
+    );
+    if (fnErr) throw fnErr;
+    const result = data as {
+      status?: string;
+      error?: string;
+      computersEvaluated?: number;
+      gamesEvaluated?: number;
+      rowsUpserted?: number;
+    };
+    if (result.status === 'error') {
+      throw new Error(result.error || 'Failed to evaluate Steam compatibility.');
+    }
+    await refreshSteamData();
+    return {
+      computersEvaluated: result.computersEvaluated ?? 0,
+      gamesEvaluated: result.gamesEvaluated ?? 0,
+      rowsUpserted: result.rowsUpserted ?? 0,
+    };
+  }, [refreshSteamData]);
+
   return {
     computers,
     cpus,
@@ -688,6 +979,10 @@ export function useInventory() {
     loading,
     error,
     refresh,
+    refreshSteamData,
+    saveSteamGameOverride,
+    resetSteamGameOverride,
+    reevaluateAllSteamCompatibility,
     saveComputer,
     deleteComputer,
     saveCpu,

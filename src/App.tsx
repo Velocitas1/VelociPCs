@@ -35,6 +35,7 @@ import {
 import { PART_CATEGORY_META } from './lib/parts';
 import type { RefCpu, RefGpu, ReferenceItem } from './lib/referenceCatalog';
 import { computeFleetRankings } from './lib/scoring';
+import { summarizeRigCompatibility } from './lib/steamCompatibility';
 import type {
   AppTab,
   Benchmark,
@@ -146,6 +147,9 @@ export function App() {
   } | null>(null);
   const directHwinfoInputRef = useRef<HTMLInputElement | null>(null);
   const pendingImportTargetRigRef = useRef<ComputerWithRelations | null>(null);
+  const [steamInitialRigId, setSteamInitialRigId] = useState<number | null>(
+    null,
+  );
 
   const [toast, setToast] = useState<string | null>(null);
 
@@ -262,6 +266,14 @@ export function App() {
     () => computeFleetRankings(inventory.computers),
     [inventory.computers],
   );
+
+  const selectedRigSteamSummary = useMemo(() => {
+    if (!selectedRig || inventory.steamGames.length === 0) return null;
+    const rows = inventory.compatibilityRows.filter(
+      (r) => r.computer_id === selectedRig.id,
+    );
+    return summarizeRigCompatibility(rows);
+  }, [selectedRig, inventory.steamGames.length, inventory.compatibilityRows]);
 
   const handleDeleteRig = async (rig: ComputerWithRelations) => {
     if (!window.confirm(`Delete "${rig.name}" (${rig.device_type})?`)) return;
@@ -468,6 +480,14 @@ export function App() {
                 steamGames={inventory.steamGames}
                 compatibilityRows={inventory.compatibilityRows}
                 isOwner={auth.isOwner}
+                initialRigId={steamInitialRigId}
+                onConsumeInitialRigId={() => setSteamInitialRigId(null)}
+                onRefreshSteam={inventory.refreshSteamData}
+                onSaveOverride={inventory.saveSteamGameOverride}
+                onResetOverride={inventory.resetSteamGameOverride}
+                onReevaluateAll={inventory.reevaluateAllSteamCompatibility}
+                onSelectComputer={(rig) => setSelectedRigId(rig.id)}
+                onNotify={showToast}
               />
             ) : null}
 
@@ -549,6 +569,12 @@ export function App() {
               }
             : undefined
         }
+        steamSummary={selectedRigSteamSummary}
+        onViewSteamForRig={(rigId) => {
+          setSelectedRigId(null);
+          setSteamInitialRigId(rigId);
+          handleSelectTab('steam');
+        }}
       />
 
       <input

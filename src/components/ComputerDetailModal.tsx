@@ -3,6 +3,7 @@ import {
   Edit3,
   ExternalLink,
   FileCode2,
+  Gamepad2,
   HardDrive,
   Laptop,
   Link2,
@@ -15,6 +16,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { getLatestBenchmarksMap, getSafeThreeDMarkUrl } from '../lib/benchmarks';
+import type { RigCompatibilitySummary } from '../lib/steamCompatibility';
 import {
   formatPassMark,
   formatRankBadge,
@@ -58,6 +60,8 @@ interface ComputerDetailModalProps {
   onDeleteBenchmark: (benchmarkId: number) => void;
   onEditPartLinks?: (target: PartLinksEditTarget) => void;
   onImportHwinfo?: (rig: ComputerWithRelations) => void;
+  steamSummary?: RigCompatibilitySummary | null;
+  onViewSteamForRig?: (rigId: number) => void;
 }
 
 export function ComputerDetailModal({
@@ -72,6 +76,8 @@ export function ComputerDetailModal({
   onDeleteBenchmark,
   onEditPartLinks,
   onImportHwinfo,
+  steamSummary,
+  onViewSteamForRig,
 }: ComputerDetailModalProps) {
   if (!rig) return null;
 
@@ -1011,6 +1017,43 @@ export function ComputerDetailModal({
               )}
             </section>
           </div>
+
+          {/* Steam Library Compatibility Summary */}
+          {steamSummary && steamSummary.total > 0 ? (
+            <section className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2 text-xs font-semibold tracking-wider text-slate-400 uppercase">
+                  <Gamepad2 className="h-4 w-4 text-cyan-400" />
+                  Steam Library Compatibility ({steamSummary.total} Titles)
+                </div>
+                {onViewSteamForRig ? (
+                  <button
+                    type="button"
+                    onClick={() => onViewSteamForRig(rig.id)}
+                    className="inline-flex items-center gap-1 rounded-lg border border-cyan-500/35 bg-cyan-500/10 px-2.5 py-1 text-xs font-medium text-cyan-300 transition hover:bg-cyan-500/20"
+                  >
+                    Browse in Steam Tab →
+                  </button>
+                ) : null}
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2 font-mono text-xs">
+                <span className="rounded-full border border-emerald-500/40 bg-emerald-500/15 px-2.5 py-0.5 text-emerald-300">
+                  Playable: {steamSummary.playable}
+                </span>
+                <span className="rounded-full border border-amber-500/40 bg-amber-500/15 px-2.5 py-0.5 text-amber-300">
+                  Minimum: {steamSummary.minimum}
+                </span>
+                <span className="rounded-full border border-rose-500/40 bg-rose-500/15 px-2.5 py-0.5 text-rose-300">
+                  Blocked: {steamSummary.blocked}
+                </span>
+                {steamSummary.unknown > 0 ? (
+                  <span className="rounded-full border border-slate-700 bg-slate-900 px-2.5 py-0.5 text-slate-400">
+                    Unknown: {steamSummary.unknown}
+                  </span>
+                ) : null}
+              </div>
+            </section>
+          ) : null}
 
           {/* 3DMark Benchmark History */}
           <section className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">

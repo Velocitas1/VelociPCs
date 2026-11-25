@@ -6,7 +6,10 @@ export type CompatibilityStatus =
   | 'blocked_directx'
   | 'blocked_vram'
   | 'blocked_ram'
+  | 'blocked_storage'
   | 'unknown';
+
+export type SteamRequirementsStatus = 'pending' | 'parsed' | 'missing' | 'error';
 
 export interface SpecLinkItem {
   label: string;
@@ -371,6 +374,11 @@ export interface SteamGame {
   header_image_url: string | null;
   store_url: string | null;
   raw_requirements: Record<string, unknown> | null;
+  playtime_minutes: number;
+  manual_override: boolean;
+  override_notes: string | null;
+  requirements_synced_at: string | null;
+  requirements_status: SteamRequirementsStatus;
   last_synced_at: string;
   created_at: string;
   updated_at: string;

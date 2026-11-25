@@ -55,11 +55,11 @@ Foundational parts-tracking architecture and automated hardware import to replac
 ---
 
 ## 3. Phase 4 Roadmap — Live Steam Library Integration
-Structural tables (`steam_library`, `build_game_compatibility`), UI tab (`src/components/SteamCompatibilityView.tsx`), and stub Edge Function (`supabase/functions/sync-steam-library/index.ts`) are already provisioned. Placed after Phases 2–3 so compatibility checks evaluate complete, HWiNFO-verified rig data.
-- [ ] Add `STEAM_WEB_API_KEY` secret in Supabase Edge Function secrets.
-- [ ] Implement live Steam sync in `supabase/functions/sync-steam-library/index.ts` (`IPlayerService/GetOwnedGames/v1` + rate-limited `store.steampowered.com/api/appdetails` parsing for min/rec DirectX, VRAM, RAM, and storage into `public.steam_library`).
-- [ ] Implement compatibility evaluator comparing `steam_library` requirements against every saved computer's DirectX version/feature level, VRAM, RAM, and storage into `public.build_game_compatibility` (`playable`, `minimum`, `blocked_directx`, `blocked_vram`, `blocked_ram`).
-- [ ] Add SteamID64 input, live sync progress UI, and optional manual requirement overrides for legacy titles in `SteamCompatibilityView.tsx`.
+Structural tables (`steam_library`, `build_game_compatibility`), UI tab (`src/components/SteamCompatibilityView.tsx`), and live Edge Function (`supabase/functions/sync-steam-library/index.ts`) are implemented and deployed. Placed after Phases 2–3 so compatibility checks evaluate complete, HWiNFO-verified rig data.
+- [x] Add `STEAM_WEB_API_KEY` secret in Supabase Edge Function secrets.
+- [x] Implement live Steam sync in `supabase/functions/sync-steam-library/index.ts` (`IPlayerService/GetOwnedGames/v1` + rate-limited `store.steampowered.com/api/appdetails` parsing for min/rec DirectX, VRAM, RAM, and storage into `public.steam_library`, plus `playtime_minutes`, vanity URL resolution, and chunked resumable sync).
+- [x] Implement compatibility evaluator comparing `steam_library` requirements against every saved computer's DirectX version/feature level (with iGPU fallback), VRAM, RAM, and largest storage drive into `public.build_game_compatibility` (`playable`, `minimum`, `blocked_directx`, `blocked_vram`, `blocked_ram`, `blocked_storage`, `unknown`).
+- [x] Add SteamID64 / vanity URL input, live chunked sync progress UI, dual-mode `By Rig` / `By Game` views, `ComputerDetailModal` summary strip, and manual requirement overrides (`SteamOverrideModal`) for legacy titles in `SteamCompatibilityView.tsx`.
 
 ---
 
