@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "typecheck": "tsc -b --noEmit",
-    "seed:sql": "node scripts/build-seed-sql.mjs"
+    "seed:sql": "node scripts/build-seed-sql.mjs",
+    "sync:catalog": "node scripts/sync-hardware-catalog.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "2.49.4",

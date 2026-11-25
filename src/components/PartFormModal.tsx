@@ -1,5 +1,19 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { ExternalLink, Layers, Plus, Trash2, X } from 'lucide-react';
+import {
+  findReferenceGpuForChipset,
+  matchCanonicalGpuChip,
+  type RefCooler,
+  type RefGpu,
+  type RefGpuCard,
+  type RefMotherboard,
+  type RefPcCase,
+  type RefPsu,
+  type RefRamKit,
+  type RefStorageDriveModel,
+  type RefWifiCard,
+  type ReferenceItem,
+} from '../lib/referenceCatalog';
 import { PART_CATEGORY_META } from '../lib/parts';
 import {
   getSafeHttpUrl,
@@ -22,16 +36,22 @@ import type {
   WifiCard,
 } from '../types/database';
 import { PartCombobox } from './PartCombobox';
+import { ReferenceCatalogSearch } from './ReferenceCatalogSearch';
 
 interface PartFormModalProps {
   open: boolean;
   category: CatalogPartCategory;
   initialQuery?: string;
+  initialReferenceItem?: ReferenceItem | null;
   editingPart?: CatalogPart | null;
   defaultSpareCount?: number;
   gpus: Gpu[];
   recentlyCreatedGpuId?: number | null;
-  onOpenGpuLookup?: (mode: 'search' | 'manual', initialQuery: string) => void;
+  onOpenGpuLookup?: (
+    mode: 'search' | 'manual',
+    initialQuery: string,
+    initialRefGpu?: RefGpu | null,
+  ) => void;
   onClose: () => void;
   onSave: (
     category: CatalogPartCategory,
@@ -72,6 +92,7 @@ export function PartFormModal({
   open,
   category,
   initialQuery = '',
+  initialReferenceItem = null,
   editingPart = null,
   defaultSpareCount = 0,
   gpus,
@@ -137,12 +158,150 @@ export function PartFormModal({
   const [wifiStandard, setWifiStandard] = useState('');
   const [bluetoothVersion, setBluetoothVersion] = useState('');
 
+  const [unmatchedChipset, setUnmatchedChipset] = useState<string | null>(null);
+  const [matchingChipLoading, setMatchingChipLoading] = useState(false);
+
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const applyReferencePart = (
+    item: ReferenceItem,
+    mode: 'replace' | 'fill_blanks',
+  ) => {
+    const fill = (
+      prev: string,
+      nextVal: string | number | null | undefined,
+    ) => {
+      const nextStr =
+        nextVal !== null && nextVal !== undefined ? String(nextVal) : '';
+      if (mode === 'fill_blanks') {
+        return prev.trim() ? prev : nextStr;
+      }
+      return nextStr;
+    };
+
+    switch (category) {
+      case 'gpu_card': {
+        const gc = item as RefGpuCard;
+        setBrand((prev) => fill(prev, gc.brand));
+        setModel((prev) => fill(prev, gc.model));
+        setPartNumber((prev) => fill(prev, gc.part_number));
+        setCoolingType((prev) => fill(prev, gc.cooling_type));
+        setLengthMm((prev) => fill(prev, gc.length_mm));
+        setSpecUrl((prev) => fill(prev, gc.spec_url));
+
+        if (gc.chipset) {
+          const matched = matchCanonicalGpuChip(gc.chipset, gpus);
+          if (matched) {
+            if (mode === 'replace' || gpuId === null) {
+              setGpuId(matched.id);
+              setUnmatchedChipset(null);
+            }
+          } else if (mode === 'replace' || gpuId === null) {
+            if (mode === 'replace') setGpuId(null);
+            setUnmatchedChipset(gc.chipset);
+          }
+        }
+        break;
+      }
+      case 'motherboard': {
+        const mb = item as RefMotherboard;
+        setBrand((prev) => fill(prev, mb.brand));
+        setModel((prev) => fill(prev, mb.model));
+        setSocket((prev) => fill(prev, mb.socket));
+        setChipset((prev) => fill(prev, mb.chipset));
+        setFormFactor((prev) => fill(prev, mb.form_factor));
+        setMemoryType((prev) => fill(prev, mb.memory_type));
+        setLaunchDate((prev) => fill(prev, mb.launch_date));
+        setSpecUrl((prev) => fill(prev, mb.spec_url));
+        break;
+      }
+      case 'ram_kit': {
+        const rk = item as RefRamKit;
+        setBrand((prev) => fill(prev, rk.brand));
+        setModel((prev) => fill(prev, rk.model));
+        setCapacityGb((prev) => fill(prev, rk.capacity_gb));
+        setModulesCount((prev) => fill(prev, rk.modules_count));
+        setRamType((prev) => fill(prev, rk.ram_type));
+        setSpeedMhz((prev) => fill(prev, rk.speed_mhz));
+        setPcRating((prev) => fill(prev, rk.pc_rating));
+        if (mode === 'replace') setIsMobile(Boolean(rk.is_mobile));
+        setSpecUrl((prev) => fill(prev, rk.spec_url));
+        break;
+      }
+      case 'storage_drive_model': {
+        const sd = item as RefStorageDriveModel;
+        setBrand((prev) => fill(prev, sd.brand));
+        setModel((prev) => fill(prev, sd.model));
+        setModelNumber((prev) => fill(prev, sd.model_number));
+        setCapacityGb((prev) => fill(prev, sd.capacity_gb));
+        setFormFactor((prev) => fill(prev, sd.form_factor));
+        setNandType((prev) => fill(prev, sd.nand_type));
+        setReadMbS((prev) => fill(prev, sd.read_mb_s));
+        setWriteMbS((prev) => fill(prev, sd.write_mb_s));
+        setSpecUrl((prev) => fill(prev, sd.spec_url));
+        break;
+      }
+      case 'psu': {
+        const p = item as RefPsu;
+        setBrand((prev) => fill(prev, p.brand));
+        setModel((prev) => fill(prev, p.model));
+        setWattage((prev) => fill(prev, p.wattage));
+        setEfficiencyRating((prev) => fill(prev, p.efficiency_rating));
+        setModular((prev) => fill(prev, p.modular));
+        const next8 =
+          p.has_8pin_cpu === null ? 'unknown' : p.has_8pin_cpu ? 'yes' : 'no';
+        const next6 =
+          p.has_6pin_pcie === null ? 'unknown' : p.has_6pin_pcie ? 'yes' : 'no';
+        setHas8PinCpu((prev) =>
+          mode === 'fill_blanks' && prev !== 'unknown' ? prev : next8,
+        );
+        setHas6PinPcie((prev) =>
+          mode === 'fill_blanks' && prev !== 'unknown' ? prev : next6,
+        );
+        setSpecUrl((prev) => fill(prev, p.spec_url));
+        break;
+      }
+      case 'case': {
+        const c = item as RefPcCase;
+        setBrand((prev) => fill(prev, c.brand));
+        setModel((prev) => fill(prev, c.model));
+        setFormFactor((prev) => fill(prev, c.form_factor));
+        setColor((prev) => fill(prev, c.color));
+        setMaxGpuLengthMm((prev) => fill(prev, c.max_gpu_length_mm));
+        setSpecUrl((prev) => fill(prev, c.spec_url));
+        break;
+      }
+      case 'cooler': {
+        const cl = item as RefCooler;
+        setBrand((prev) => fill(prev, cl.brand));
+        setModel((prev) => fill(prev, cl.model));
+        setCoolerType((prev) => fill(prev, cl.cooler_type));
+        setFanSizeMm((prev) => fill(prev, cl.fan_size_mm));
+        setSocketSupport((prev) => fill(prev, cl.socket_support));
+        setTdpRatingW((prev) => fill(prev, cl.tdp_rating_w));
+        setSpecUrl((prev) => fill(prev, cl.spec_url));
+        break;
+      }
+      case 'wifi_card': {
+        const w = item as RefWifiCard;
+        setBrand((prev) => fill(prev, w.brand));
+        setModel((prev) => fill(prev, w.model));
+        setWifiProduct((prev) => fill(prev, w.product));
+        setWifiStandard((prev) => fill(prev, w.wifi_standard));
+        setBluetoothVersion((prev) => fill(prev, w.bluetooth_version));
+        setFormFactor((prev) => fill(prev, w.form_factor));
+        if (mode === 'replace') setIsMobile(Boolean(w.is_mobile));
+        setSpecUrl((prev) => fill(prev, w.spec_url));
+        break;
+      }
+    }
+  };
 
   useEffect(() => {
     if (!open) return;
     setError(null);
+    setUnmatchedChipset(null);
 
     const resetCommon = (
       b: string,
@@ -195,6 +354,10 @@ export function PartFormModal({
       setWifiProduct('');
       setWifiStandard('');
       setBluetoothVersion('');
+
+      if (initialReferenceItem) {
+        applyReferencePart(initialReferenceItem, 'replace');
+      }
       return;
     }
 
@@ -282,11 +445,19 @@ export function PartFormModal({
         break;
       }
     }
-  }, [open, category, editingPart, initialQuery, defaultSpareCount]);
+  }, [
+    open,
+    category,
+    editingPart,
+    initialQuery,
+    initialReferenceItem,
+    defaultSpareCount,
+  ]);
 
   useEffect(() => {
     if (open && category === 'gpu_card' && recentlyCreatedGpuId) {
       setGpuId(recentlyCreatedGpuId);
+      setUnmatchedChipset(null);
     }
   }, [open, category, recentlyCreatedGpuId]);
 
@@ -500,20 +671,66 @@ export function PartFormModal({
           onSubmit={handleSubmit}
           className="space-y-4 overflow-y-auto p-5 text-xs"
         >
+          <ReferenceCatalogSearch
+            category={category}
+            initialQuery={initialQuery}
+            isEditing={Boolean(editingPart)}
+            placeholder={`Search open-source ${meta.singular} catalog to auto-fill...`}
+            onSelect={(item, mode) => applyReferencePart(item, mode)}
+          />
+
           {category === 'gpu_card' ? (
-            <div>
+            <div className="space-y-2">
               <PartCombobox
                 partType="gpu"
                 label="Canonical GPU Silicon Chip *"
                 parts={gpus}
                 selectedId={gpuId}
-                onSelect={setGpuId}
+                onSelect={(id) => {
+                  setGpuId(id);
+                  if (id !== null) setUnmatchedChipset(null);
+                }}
                 hideMobileByDefault={true}
                 onOpenLookup={(mode, q) => {
                   onOpenGpuLookup?.(mode, q);
                 }}
+                onSelectReferenceItem={(refGpu) => {
+                  onOpenGpuLookup?.(
+                    'search',
+                    `${refGpu.brand} ${refGpu.name}`.trim(),
+                    refGpu as RefGpu,
+                  );
+                }}
                 placeholder="Select GPU chip (e.g. NVIDIA GeForce GTX 970)..."
               />
+              {unmatchedChipset && !gpuId ? (
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-500/35 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+                  <span>
+                    Chipset <strong>{unmatchedChipset}</strong> isn&apos;t in your
+                    saved GPU chips yet.
+                  </span>
+                  <button
+                    type="button"
+                    disabled={matchingChipLoading}
+                    onClick={async () => {
+                      setMatchingChipLoading(true);
+                      try {
+                        const refGpu =
+                          await findReferenceGpuForChipset(unmatchedChipset);
+                        onOpenGpuLookup?.('search', unmatchedChipset, refGpu);
+                      } finally {
+                        setMatchingChipLoading(false);
+                      }
+                    }}
+                    className="inline-flex items-center gap-1 rounded-md bg-amber-400 px-2.5 py-1 text-[11px] font-semibold text-slate-950 hover:bg-amber-300 disabled:opacity-60"
+                  >
+                    <Plus className="h-3 w-3" />
+                    {matchingChipLoading
+                      ? 'Loading...'
+                      : `Add ${unmatchedChipset} Chip`}
+                  </button>
+                </div>
+              ) : null}
             </div>
           ) : null}
 

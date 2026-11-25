@@ -36,6 +36,7 @@ import {
   getCompositeTooltip,
 } from '../lib/scoring';
 import { COMPUTER_SLOT_META, parseHttpUrl } from '../lib/specLinks';
+import type { RefCpu, RefGpu, ReferenceItem } from '../lib/referenceCatalog';
 import type {
   BuildStatus,
   CatalogPart,
@@ -110,11 +111,13 @@ interface ComputerFormModalProps {
     mode: 'search' | 'manual',
     initialQuery: string,
     targetField: 'cpu_id' | 'gpu_id' | 'igpu_id',
+    initialRefItem?: RefCpu | RefGpu | null,
   ) => void;
   onOpenCreateCatalogPart: (
     category: CatalogPartCategory,
     initialQuery: string,
     targetSlot: string,
+    initialRefItem?: ReferenceItem | null,
   ) => void;
   recentlyCreatedPart?: {
     targetField: 'cpu_id' | 'gpu_id' | 'igpu_id';
@@ -1007,6 +1010,15 @@ export function ComputerFormModal({
                   onOpenLookup={(mode, q) =>
                     onOpenPartLookup('cpu', mode, q, 'cpu_id')
                   }
+                  onSelectReferenceItem={(refItem) =>
+                    onOpenPartLookup(
+                      'cpu',
+                      'search',
+                      `${refItem.brand} ${refItem.name}`.trim(),
+                      'cpu_id',
+                      refItem,
+                    )
+                  }
                 />
               </div>
               <div>
@@ -1038,6 +1050,10 @@ export function ComputerFormModal({
                 }}
                 onAddNew={(q) =>
                   onOpenCreateCatalogPart('gpu_card', q, 'gpu_card_id')
+                }
+                referenceCategory="gpu_card"
+                onSelectReferenceItem={(refItem) =>
+                  onOpenCreateCatalogPart('gpu_card', '', 'gpu_card_id', refItem)
                 }
                 addNewLabel="Add New GPU Card"
                 getLabel={formatGpuCardLabel}
@@ -1072,6 +1088,15 @@ export function ComputerFormModal({
                 onOpenLookup={(mode, q) =>
                   onOpenPartLookup('gpu', mode, q, 'gpu_id')
                 }
+                onSelectReferenceItem={(refItem) =>
+                  onOpenPartLookup(
+                    'gpu',
+                    'search',
+                    `${refItem.brand} ${refItem.name}`.trim(),
+                    'gpu_id',
+                    refItem,
+                  )
+                }
               />
               <PartCombobox
                 partType="gpu"
@@ -1083,6 +1108,15 @@ export function ComputerFormModal({
                 installedCountById={installedMaps.gpu}
                 onOpenLookup={(mode, q) =>
                   onOpenPartLookup('gpu', mode, q, 'igpu_id')
+                }
+                onSelectReferenceItem={(refItem) =>
+                  onOpenPartLookup(
+                    'gpu',
+                    'search',
+                    `${refItem.brand} ${refItem.name}`.trim(),
+                    'igpu_id',
+                    refItem,
+                  )
                 }
                 placeholder="Optional iGPU..."
               />
@@ -1136,6 +1170,10 @@ export function ComputerFormModal({
               }}
               onAddNew={(q) =>
                 onOpenCreateCatalogPart('ram_kit', q, 'ram_kit_id')
+              }
+              referenceCategory="ram_kit"
+              onSelectReferenceItem={(refItem) =>
+                onOpenCreateCatalogPart('ram_kit', '', 'ram_kit_id', refItem)
               }
               addNewLabel="Add New RAM Kit"
               getLabel={formatRamKitLabel}
@@ -1214,6 +1252,15 @@ export function ComputerFormModal({
                   onAddNew={(q) =>
                     onOpenCreateCatalogPart('motherboard', q, 'motherboard_id')
                   }
+                  referenceCategory="motherboard"
+                  onSelectReferenceItem={(refItem) =>
+                    onOpenCreateCatalogPart(
+                      'motherboard',
+                      '',
+                      'motherboard_id',
+                      refItem,
+                    )
+                  }
                   addNewLabel="Add New Motherboard"
                   getLabel={formatMotherboardLabel}
                   getSubtitle={formatMotherboardSubtitle}
@@ -1273,6 +1320,10 @@ export function ComputerFormModal({
                     if (p) applyPsuSelection(p);
                   }}
                   onAddNew={(q) => onOpenCreateCatalogPart('psu', q, 'psu_id')}
+                  referenceCategory="psu"
+                  onSelectReferenceItem={(refItem) =>
+                    onOpenCreateCatalogPart('psu', '', 'psu_id', refItem)
+                  }
                   addNewLabel="Add New PSU"
                   getLabel={formatPsuLabel}
                   getSubtitle={formatPsuSubtitle}
@@ -1352,6 +1403,10 @@ export function ComputerFormModal({
                   selectedId={caseId}
                   onSelect={setCaseId}
                   onAddNew={(q) => onOpenCreateCatalogPart('case', q, 'case_id')}
+                  referenceCategory="case"
+                  onSelectReferenceItem={(refItem) =>
+                    onOpenCreateCatalogPart('case', '', 'case_id', refItem)
+                  }
                   addNewLabel="Add New Case"
                   getLabel={formatCaseLabel}
                   getSubtitle={formatCaseSubtitle}
@@ -1368,6 +1423,10 @@ export function ComputerFormModal({
                   onSelect={setCoolerId}
                   onAddNew={(q) =>
                     onOpenCreateCatalogPart('cooler', q, 'cooler_id')
+                  }
+                  referenceCategory="cooler"
+                  onSelectReferenceItem={(refItem) =>
+                    onOpenCreateCatalogPart('cooler', '', 'cooler_id', refItem)
                   }
                   addNewLabel="Add New Cooler"
                   getLabel={formatCoolerLabel}
@@ -1402,6 +1461,15 @@ export function ComputerFormModal({
                   }}
                   onAddNew={(q) =>
                     onOpenCreateCatalogPart('wifi_card', q, 'wifi_card_id')
+                  }
+                  referenceCategory="wifi_card"
+                  onSelectReferenceItem={(refItem) =>
+                    onOpenCreateCatalogPart(
+                      'wifi_card',
+                      '',
+                      'wifi_card_id',
+                      refItem,
+                    )
                   }
                   addNewLabel="Add New Wi-Fi Card"
                   getLabel={formatWifiCardLabel}
@@ -1485,6 +1553,15 @@ export function ComputerFormModal({
                   }}
                   onAddNew={(q) =>
                     onOpenCreateCatalogPart('wifi_card', q, 'wifi_card_id')
+                  }
+                  referenceCategory="wifi_card"
+                  onSelectReferenceItem={(refItem) =>
+                    onOpenCreateCatalogPart(
+                      'wifi_card',
+                      '',
+                      'wifi_card_id',
+                      refItem,
+                    )
                   }
                   addNewLabel="Add New Wi-Fi Card"
                   getLabel={formatWifiCardLabel}
@@ -1612,6 +1689,15 @@ export function ComputerFormModal({
                         'storage_drive_model',
                         q,
                         `drive:${idx}`,
+                      )
+                    }
+                    referenceCategory="storage_drive_model"
+                    onSelectReferenceItem={(refItem) =>
+                      onOpenCreateCatalogPart(
+                        'storage_drive_model',
+                        '',
+                        `drive:${idx}`,
+                        refItem,
                       )
                     }
                     addNewLabel="Add New Drive Model"

@@ -26,6 +26,7 @@ import {
   type CompareState,
 } from './lib/compare';
 import { PART_CATEGORY_META } from './lib/parts';
+import type { RefCpu, RefGpu, ReferenceItem } from './lib/referenceCatalog';
 import { computeFleetRankings } from './lib/scoring';
 import type {
   AppTab,
@@ -82,6 +83,7 @@ export function App() {
     partType: 'cpu' | 'gpu';
     mode: 'search' | 'manual';
     initialQuery: string;
+    initialReferenceItem?: RefCpu | RefGpu | null;
     editingCpu: Cpu | null;
     editingGpu: Gpu | null;
     targetField?: 'cpu_id' | 'gpu_id' | 'igpu_id';
@@ -91,6 +93,7 @@ export function App() {
     partType: 'cpu',
     mode: 'search',
     initialQuery: '',
+    initialReferenceItem: null,
     editingCpu: null,
     editingGpu: null,
   });
@@ -99,6 +102,7 @@ export function App() {
     open: boolean;
     category: CatalogPartCategory;
     initialQuery: string;
+    initialReferenceItem?: ReferenceItem | null;
     editingPart: CatalogPart | null;
     defaultSpareCount: number;
     targetSlot?: string;
@@ -106,6 +110,7 @@ export function App() {
     open: false,
     category: 'motherboard',
     initialQuery: '',
+    initialReferenceItem: null,
     editingPart: null,
     defaultSpareCount: 0,
   });
@@ -334,6 +339,7 @@ export function App() {
                     partType,
                     mode: 'search',
                     initialQuery: '',
+                    initialReferenceItem: null,
                     editingCpu: null,
                     editingGpu: null,
                   })
@@ -344,6 +350,7 @@ export function App() {
                     partType: 'cpu',
                     mode: 'manual',
                     initialQuery: '',
+                    initialReferenceItem: null,
                     editingCpu: cpu,
                     editingGpu: null,
                   })
@@ -355,6 +362,7 @@ export function App() {
                     partType: 'gpu',
                     mode: 'manual',
                     initialQuery: '',
+                    initialReferenceItem: null,
                     editingCpu: null,
                     editingGpu: gpu,
                   })
@@ -365,6 +373,7 @@ export function App() {
                     open: true,
                     category,
                     initialQuery: '',
+                    initialReferenceItem: null,
                     editingPart: null,
                     defaultSpareCount: 1,
                   })
@@ -374,6 +383,7 @@ export function App() {
                     open: true,
                     category,
                     initialQuery: '',
+                    initialReferenceItem: null,
                     editingPart: part,
                     defaultSpareCount: 0,
                   })
@@ -487,23 +497,36 @@ export function App() {
           showToast(id ? `Updated ${payload.name}` : `Added ${payload.name}`);
           return savedId;
         }}
-        onOpenPartLookup={(partType, mode, initialQuery, targetField) =>
+        onOpenPartLookup={(
+          partType,
+          mode,
+          initialQuery,
+          targetField,
+          initialRefItem,
+        ) =>
           setLookupState({
             open: true,
             partType,
             mode,
             initialQuery,
+            initialReferenceItem: initialRefItem ?? null,
             editingCpu: null,
             editingGpu: null,
             targetField,
             forGpuCardModal: false,
           })
         }
-        onOpenCreateCatalogPart={(category, initialQuery, targetSlot) =>
+        onOpenCreateCatalogPart={(
+          category,
+          initialQuery,
+          targetSlot,
+          initialRefItem,
+        ) =>
           setPartFormState({
             open: true,
             category,
             initialQuery,
+            initialReferenceItem: initialRefItem ?? null,
             editingPart: null,
             defaultSpareCount: 0,
             targetSlot,
@@ -517,23 +540,30 @@ export function App() {
         open={partFormState.open}
         category={partFormState.category}
         initialQuery={partFormState.initialQuery}
+        initialReferenceItem={partFormState.initialReferenceItem}
         editingPart={partFormState.editingPart}
         defaultSpareCount={partFormState.defaultSpareCount}
         gpus={inventory.gpus}
         recentlyCreatedGpuId={recentlyCreatedGpuForCardId}
-        onOpenGpuLookup={(mode, initialQuery) =>
+        onOpenGpuLookup={(mode, initialQuery, initialRefGpu) =>
           setLookupState({
             open: true,
             partType: 'gpu',
             mode,
             initialQuery,
+            initialReferenceItem: initialRefGpu ?? null,
             editingCpu: null,
             editingGpu: null,
             forGpuCardModal: true,
           })
         }
         onClose={() =>
-          setPartFormState((s) => ({ ...s, open: false, targetSlot: undefined }))
+          setPartFormState((s) => ({
+            ...s,
+            open: false,
+            initialReferenceItem: null,
+            targetSlot: undefined,
+          }))
         }
         onSave={inventory.saveCatalogPart}
         onSaved={(category, part) => {
@@ -555,9 +585,16 @@ export function App() {
         partType={lookupState.partType}
         initialMode={lookupState.mode}
         initialQuery={lookupState.initialQuery}
+        initialReferenceItem={lookupState.initialReferenceItem}
         editingCpu={lookupState.editingCpu}
         editingGpu={lookupState.editingGpu}
-        onClose={() => setLookupState((s) => ({ ...s, open: false }))}
+        onClose={() =>
+          setLookupState((s) => ({
+            ...s,
+            open: false,
+            initialReferenceItem: null,
+          }))
+        }
         onSaveCpu={inventory.saveCpu}
         onSaveGpu={inventory.saveGpu}
         onSaved={(part) => {

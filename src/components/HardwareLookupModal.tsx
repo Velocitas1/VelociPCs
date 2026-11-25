@@ -4,8 +4,6 @@ import {
   Globe,
   Loader2,
   Plus,
-  Search,
-  Sparkles,
   Trash2,
   X,
 } from 'lucide-react';
@@ -14,8 +12,10 @@ import {
   formatScoreUpdatedDate,
 } from '../lib/scoring';
 import { getSafeHttpUrl, parseHttpUrl, PART_LINK_PRESETS } from '../lib/specLinks';
+import type { RefCpu, RefGpu } from '../lib/referenceCatalog';
 import { supabase } from '../lib/supabase';
 import type { Cpu, Gpu, SpecLinkItem } from '../types/database';
+import { ReferenceCatalogSearch } from './ReferenceCatalogSearch';
 
 interface LookupResultItem {
   partType: 'cpu' | 'gpu';
@@ -54,6 +54,7 @@ interface HardwareLookupModalProps {
   partType: 'cpu' | 'gpu';
   initialMode?: 'search' | 'manual';
   initialQuery?: string;
+  initialReferenceItem?: RefCpu | RefGpu | null;
   editingCpu?: Cpu | null;
   editingGpu?: Gpu | null;
   onClose: () => void;
@@ -79,6 +80,7 @@ export function HardwareLookupModal({
   partType,
   initialMode = 'search',
   initialQuery = '',
+  initialReferenceItem = null,
   editingCpu = null,
   editingGpu = null,
   onClose,
@@ -128,6 +130,103 @@ export function HardwareLookupModal({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const applyReferenceItem = (
+    item: RefCpu | RefGpu,
+    mode: 'replace' | 'fill_blanks',
+  ) => {
+    const fill = (prev: string, nextVal: string | number | null | undefined) => {
+      const nextStr =
+        nextVal !== null && nextVal !== undefined ? String(nextVal) : '';
+      if (mode === 'fill_blanks') {
+        return prev.trim() ? prev : nextStr;
+      }
+      return nextStr;
+    };
+
+    if (mode === 'replace') {
+      setBrand(item.brand);
+      setName(item.name);
+      setIsMobile(Boolean(item.is_mobile));
+    } else {
+      setBrand((prev) => (prev.trim() ? prev : item.brand));
+      setName((prev) => (prev.trim() ? prev : item.name));
+    }
+
+    setSpecUrl((prev) => fill(prev, item.spec_url));
+    setTdpW((prev) => fill(prev, item.tdp_w));
+    setProcessNm((prev) => fill(prev, item.process_nm));
+
+    if (partType === 'cpu') {
+      const c = item as RefCpu;
+      setCodename((prev) => fill(prev, c.codename));
+      setSocket((prev) => fill(prev, c.socket));
+      setBaseGhz((prev) => fill(prev, c.base_clock_ghz));
+      setTurboGhz((prev) => fill(prev, c.turbo_clock_ghz));
+      setCacheMb((prev) => fill(prev, c.cache_mb));
+      setCores((prev) => fill(prev, c.cores));
+      setThreads((prev) => fill(prev, c.threads));
+      setMaxMemGb((prev) => fill(prev, c.max_memory_gb));
+      setMemType((prev) => fill(prev, c.memory_type));
+      setMemSpeedMhz((prev) => fill(prev, c.memory_speed_mhz));
+      setLaunchDate((prev) => fill(prev, c.launch_date));
+    } else {
+      const g = item as RefGpu;
+      setArchitecture((prev) => fill(prev, g.architecture));
+      setVramGb((prev) => fill(prev, g.vram_gb));
+      setVramType((prev) => fill(prev, g.vram_type));
+      setBusInterface((prev) => fill(prev, g.bus_interface));
+      setDxVersion((prev) => fill(prev, g.directx_version));
+      setDxFeatureLevel((prev) => fill(prev, g.directx_feature_level));
+      setCategory((prev) => fill(prev, g.category));
+    }
+  };
+
+  const mergeLookupEnrichment = (item: LookupResultItem) => {
+    const fill = (prev: string, nextVal: string | number | null | undefined) => {
+      if (prev.trim()) return prev;
+      return nextVal !== null && nextVal !== undefined ? String(nextVal) : '';
+    };
+
+    setBrand((prev) => (prev.trim() ? prev : item.brand));
+    setName((prev) => (prev.trim() ? prev : item.name));
+    setSpecUrl((prev) => (prev.trim() ? prev : item.spec_url ?? ''));
+    setPassmarkScore((prev) => fill(prev, item.passmark_score));
+    setTdpW((prev) => fill(prev, item.tdp_w));
+    setProcessNm((prev) => fill(prev, item.process_nm));
+
+    if (item.spec_links && item.spec_links.length > 0) {
+      setSpecLinks((prev) => {
+        const seen = new Set(prev.map((l) => l.url.trim()));
+        const additions = item.spec_links!.filter(
+          (l) => l.url && !seen.has(l.url),
+        );
+        return additions.length > 0 ? [...prev, ...additions] : prev;
+      });
+    }
+
+    if (partType === 'cpu') {
+      setCodename((prev) => fill(prev, item.codename));
+      setSocket((prev) => fill(prev, item.socket));
+      setBaseGhz((prev) => fill(prev, item.base_clock_ghz));
+      setTurboGhz((prev) => fill(prev, item.turbo_clock_ghz));
+      setCacheMb((prev) => fill(prev, item.cache_mb));
+      setCores((prev) => fill(prev, item.cores));
+      setThreads((prev) => fill(prev, item.threads));
+      setMaxMemGb((prev) => fill(prev, item.max_memory_gb));
+      setMemType((prev) => fill(prev, item.memory_type));
+      setMemSpeedMhz((prev) => fill(prev, item.memory_speed_mhz));
+      setLaunchDate((prev) => fill(prev, item.launch_date));
+    } else {
+      setArchitecture((prev) => fill(prev, item.architecture));
+      setVramGb((prev) => fill(prev, item.vram_gb));
+      setVramType((prev) => fill(prev, item.vram_type));
+      setBusInterface((prev) => fill(prev, item.bus_interface));
+      setDxVersion((prev) => fill(prev, item.directx_version));
+      setDxFeatureLevel((prev) => fill(prev, item.directx_feature_level));
+      setCategory((prev) => fill(prev, item.category));
+    }
+  };
+
   useEffect(() => {
     if (!open) return;
     setError(null);
@@ -136,6 +235,7 @@ export function HardwareLookupModal({
     setQuery(initialQuery);
 
     if (partType === 'cpu' && editingCpu) {
+      setQuery(`${editingCpu.brand} ${editingCpu.name}`.trim());
       setName(editingCpu.name);
       setBrand(editingCpu.brand);
       setSpecUrl(editingCpu.spec_url ?? '');
@@ -157,6 +257,7 @@ export function HardwareLookupModal({
       setMemSpeedMhz(editingCpu.memory_speed_mhz?.toString() ?? '');
       setLaunchDate(editingCpu.launch_date ?? '');
     } else if (partType === 'gpu' && editingGpu) {
+      setQuery(`${editingGpu.brand} ${editingGpu.name}`.trim());
       setName(editingGpu.name);
       setBrand(editingGpu.brand);
       setSpecUrl(editingGpu.spec_url ?? '');
@@ -200,8 +301,51 @@ export function HardwareLookupModal({
       setDxVersion('');
       setDxFeatureLevel('');
       setCategory('');
+
+      if (initialReferenceItem) {
+        setQuery(
+          `${initialReferenceItem.brand} ${initialReferenceItem.name}`.trim(),
+        );
+        setName(initialReferenceItem.name);
+        setBrand(initialReferenceItem.brand);
+        setSpecUrl(initialReferenceItem.spec_url ?? '');
+        setIsMobile(Boolean(initialReferenceItem.is_mobile));
+        setTdpW(initialReferenceItem.tdp_w?.toString() ?? '');
+        setProcessNm(initialReferenceItem.process_nm?.toString() ?? '');
+        if (partType === 'cpu') {
+          const c = initialReferenceItem as RefCpu;
+          setCodename(c.codename ?? '');
+          setSocket(c.socket ?? '');
+          setBaseGhz(c.base_clock_ghz?.toString() ?? '');
+          setTurboGhz(c.turbo_clock_ghz?.toString() ?? '');
+          setCacheMb(c.cache_mb?.toString() ?? '');
+          setCores(c.cores?.toString() ?? '');
+          setThreads(c.threads?.toString() ?? '');
+          setMaxMemGb(c.max_memory_gb?.toString() ?? '');
+          setMemType(c.memory_type ?? '');
+          setMemSpeedMhz(c.memory_speed_mhz?.toString() ?? '');
+          setLaunchDate(c.launch_date ?? '');
+        } else {
+          const g = initialReferenceItem as RefGpu;
+          setArchitecture(g.architecture ?? '');
+          setVramGb(g.vram_gb?.toString() ?? '');
+          setVramType(g.vram_type ?? '');
+          setBusInterface(g.bus_interface ?? '');
+          setDxVersion(g.directx_version ?? '');
+          setDxFeatureLevel(g.directx_feature_level ?? '');
+          setCategory(g.category ?? '');
+        }
+      }
     }
-  }, [open, partType, initialMode, initialQuery, editingCpu, editingGpu]);
+  }, [
+    open,
+    partType,
+    initialMode,
+    initialQuery,
+    initialReferenceItem,
+    editingCpu,
+    editingGpu,
+  ]);
 
   if (!open) return null;
 
@@ -239,7 +383,8 @@ export function HardwareLookupModal({
   };
 
   const handleLookup = async () => {
-    if (!query.trim()) return;
+    const searchTerm = query.trim() || `${brand} ${name}`.trim();
+    if (!searchTerm) return;
     setSearching(true);
     setError(null);
     setLookupNote(null);
@@ -248,7 +393,7 @@ export function HardwareLookupModal({
       const { data, error: fnErr } = await supabase.functions.invoke(
         'lookup-hardware-spec',
         {
-          body: { query: query.trim(), partType, vendor },
+          body: { query: searchTerm, partType, vendor },
         },
       );
       if (fnErr) throw fnErr;
@@ -257,13 +402,17 @@ export function HardwareLookupModal({
       setResults(items);
       setLookupNote(data?.note ?? null);
       if (items.length > 0) {
-        applyLookupItem(items[0]);
+        if (name.trim()) {
+          mergeLookupEnrichment(items[0]);
+        } else {
+          applyLookupItem(items[0]);
+        }
       }
     } catch (err) {
       setError(
         err instanceof Error
           ? err.message
-          : 'Spec lookup failed. Ensure you are signed in or enter details manually.',
+          : 'Live web enrich failed. Ensure you are signed in or use the instant Reference Catalog above.',
       );
     } finally {
       setSearching(false);
@@ -417,10 +566,10 @@ export function HardwareLookupModal({
               <h2 className="text-base font-semibold text-white">
                 {editingCpu || editingGpu
                   ? `Edit ${partType.toUpperCase()}`
-                  : `Search Intel / AMD Specs & Add ${partType.toUpperCase()}`}
+                  : `Search Open-Source Catalog & Add ${partType.toUpperCase()}`}
               </h2>
               <p className="text-xs text-slate-400">
-                Auto-fill specs via Supabase Edge Function (`lookup-hardware-spec`) and review before saving
+                Instant open-source hardware catalog auto-fill + optional Live Web Enrich (PassMark &amp; direct links)
               </p>
             </div>
           </div>
@@ -434,94 +583,87 @@ export function HardwareLookupModal({
         </div>
 
         <div className="space-y-5 overflow-y-auto p-5">
-          {/* Spec Lookup Search Bar */}
-          {!editingCpu && !editingGpu ? (
-            <div className="rounded-xl border border-cyan-500/25 bg-cyan-500/5 p-4">
-              <div className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-cyan-300">
-                <Sparkles className="h-3.5 w-3.5" />
-                Lookup Official Intel / AMD / NVIDIA Specs
-              </div>
-              <div className="flex flex-col gap-2 sm:flex-row">
-                <div className="relative flex-1">
-                  <Search className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-slate-500" />
-                  <input
-                    type="text"
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        void handleLookup();
-                      }
-                    }}
-                    placeholder={
-                      partType === 'cpu'
-                        ? 'e.g. Ryzen 7 7800X3D, Core i5-12400F, Core 2 Quad Q6600'
-                        : 'e.g. GeForce RTX 4070 Super, Radeon RX 7800 XT, Arc B580'
+          {/* Primary Instant Reference Catalog Auto-Fill + Secondary Live Web Enrich */}
+          <div className="space-y-2.5">
+            <ReferenceCatalogSearch
+              category={partType}
+              isEditing={Boolean(editingCpu || editingGpu)}
+              vendorFilter={vendor}
+              queryValue={query}
+              onQueryChange={setQuery}
+              placeholder={
+                partType === 'cpu'
+                  ? 'e.g. Ryzen 7 7800X3D, Core i5-12400F, Core 2 Quad Q6600'
+                  : 'e.g. GeForce RTX 4070 Super, Radeon RX 7800 XT, GeForce GTX 970'
+              }
+              onSelect={(item, mode) => {
+                applyReferenceItem(item as RefCpu | RefGpu, mode);
+                setQuery(`${item.brand} ${(item as RefCpu | RefGpu).name}`.trim());
+              }}
+              extraAction={
+                <div className="flex items-center gap-2">
+                  <select
+                    value={vendor}
+                    onChange={(e) =>
+                      setVendor(
+                        e.target.value as 'Auto' | 'Intel' | 'AMD' | 'NVIDIA',
+                      )
                     }
-                    className="w-full rounded-lg border border-slate-700 bg-slate-950 py-2 pr-3 pl-9 text-sm text-white placeholder-slate-500 focus:border-cyan-400 focus:outline-none"
-                  />
+                    className="rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-2 text-xs text-slate-200"
+                  >
+                    <option value="Auto">Auto Vendor</option>
+                    <option value="Intel">Intel</option>
+                    <option value="AMD">AMD</option>
+                    {partType === 'gpu' ? (
+                      <option value="NVIDIA">NVIDIA</option>
+                    ) : null}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => void handleLookup()}
+                    disabled={searching}
+                    title="Fetch PassMark score and direct ARK/AMD/TechPowerUp links via Edge Function"
+                    className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-cyan-500/40 bg-slate-950 px-3 py-2 text-xs font-semibold text-cyan-300 hover:bg-cyan-500/15 disabled:opacity-60"
+                  >
+                    {searching ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Globe className="h-3.5 w-3.5" />
+                    )}
+                    Live Web Enrich
+                  </button>
                 </div>
-                <select
-                  value={vendor}
-                  onChange={(e) =>
-                    setVendor(
-                      e.target.value as 'Auto' | 'Intel' | 'AMD' | 'NVIDIA',
-                    )
-                  }
-                  className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-slate-200"
-                >
-                  <option value="Auto">Auto Vendor</option>
-                  <option value="Intel">Intel</option>
-                  <option value="AMD">AMD</option>
-                  {partType === 'gpu' ? (
-                    <option value="NVIDIA">NVIDIA</option>
-                  ) : null}
-                </select>
-                <button
-                  type="button"
-                  onClick={() => void handleLookup()}
-                  disabled={searching}
-                  className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-cyan-500 px-4 py-2 text-xs font-semibold text-slate-950 hover:bg-cyan-400 disabled:opacity-60"
-                >
-                  {searching ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Search className="h-3.5 w-3.5" />
-                  )}
-                  Fetch Specs
-                </button>
+              }
+            />
+
+            {lookupNote ? (
+              <p className="px-1 text-xs text-slate-300">{lookupNote}</p>
+            ) : null}
+
+            {results.length > 0 ? (
+              <div className="flex flex-wrap gap-2 px-1">
+                {results.map((item, idx) => (
+                  <button
+                    key={`${item.name}-${idx}`}
+                    type="button"
+                    onClick={() => applyLookupItem(item)}
+                    className={`rounded-lg border px-2.5 py-1.5 text-left text-xs transition ${
+                      name === item.name
+                        ? 'border-cyan-400 bg-cyan-500/20 text-white'
+                        : 'border-slate-700 bg-slate-950 text-slate-300 hover:border-slate-500'
+                    }`}
+                  >
+                    <span className="font-semibold">
+                      {item.brand} {item.name}
+                    </span>
+                    <span className="ml-1.5 font-mono text-[10px] text-cyan-300 uppercase">
+                      {item.source}
+                    </span>
+                  </button>
+                ))}
               </div>
-
-              {lookupNote ? (
-                <p className="mt-2 text-xs text-slate-300">{lookupNote}</p>
-              ) : null}
-
-              {results.length > 0 ? (
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {results.map((item, idx) => (
-                    <button
-                      key={`${item.name}-${idx}`}
-                      type="button"
-                      onClick={() => applyLookupItem(item)}
-                      className={`rounded-lg border px-2.5 py-1.5 text-left text-xs transition ${
-                        name === item.name
-                          ? 'border-cyan-400 bg-cyan-500/20 text-white'
-                          : 'border-slate-700 bg-slate-950 text-slate-300 hover:border-slate-500'
-                      }`}
-                    >
-                      <span className="font-semibold">
-                        {item.brand} {item.name}
-                      </span>
-                      <span className="ml-1.5 font-mono text-[10px] text-cyan-300 uppercase">
-                        {item.source}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-          ) : null}
+            ) : null}
+          </div>
 
           {/* Review & Edit Form */}
           <form onSubmit={handleSubmit} className="space-y-4">

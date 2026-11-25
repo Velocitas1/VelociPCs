@@ -1,0 +1,72 @@
+{
+  "version": 1,
+  "generated_at": "2026-11-25T21:14:50.302Z",
+  "sources": {
+    "dbgpu": "2025.12",
+    "rightnow_gpu": "main",
+    "docyx_pc_part_dataset": "main",
+    "buildcores_open_db": "main"
+  },
+  "categories": {
+    "cpus": {
+      "file": "cpus.json",
+      "count": 1251,
+      "rawBytes": 215263,
+      "gzipBytes": 19313
+    },
+    "gpus": {
+      "file": "gpus.json",
+      "count": 2876,
+      "rawBytes": 502056,
+      "gzipBytes": 47965
+    },
+    "gpu_cards": {
+      "file": "gpu_cards.json",
+      "count": 9858,
+      "rawBytes": 973239,
+      "gzipBytes": 115388
+    },
+    "motherboards": {
+      "file": "motherboards.json",
+      "count": 8363,
+      "rawBytes": 736270,
+      "gzipBytes": 71001
+    },
+    "ram_kits": {
+      "file": "ram_kits.json",
+      "count": 12592,
+      "rawBytes": 1194630,
+      "gzipBytes": 94163
+    },
+    "storage_drive_models": {
+      "file": "storage_drive_models.json",
+      "count": 8726,
+      "rawBytes": 765078,
+      "gzipBytes": 72705
+    },
+    "psus": {
+      "file": "psus.json",
+      "count": 6390,
+      "rawBytes": 587703,
+      "gzipBytes": 53497
+    },
+    "cases": {
+      "file": "cases.json",
+      "count": 8012,
+      "rawBytes": 836970,
+      "gzipBytes": 87857
+    },
+    "coolers": {
+      "file": "coolers.json",
+      "count": 4711,
+      "rawBytes": 607640,
+      "gzipBytes": 50001
+    },
+    "wifi_cards": {
+      "file": "wifi_cards.json",
+      "count": 360,
+      "rawBytes": 28986,
+      "gzipBytes": 3073
+    }
+  }
+}
