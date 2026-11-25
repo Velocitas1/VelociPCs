@@ -2,6 +2,7 @@ import {
   Cpu as CpuIcon,
   Edit3,
   ExternalLink,
+  FileCode2,
   HardDrive,
   Laptop,
   Link2,
@@ -56,6 +57,7 @@ interface ComputerDetailModalProps {
   ) => void;
   onDeleteBenchmark: (benchmarkId: number) => void;
   onEditPartLinks?: (target: PartLinksEditTarget) => void;
+  onImportHwinfo?: (rig: ComputerWithRelations) => void;
 }
 
 export function ComputerDetailModal({
@@ -69,6 +71,7 @@ export function ComputerDetailModal({
   onEditBenchmark,
   onDeleteBenchmark,
   onEditPartLinks,
+  onImportHwinfo,
 }: ComputerDetailModalProps) {
   if (!rig) return null;
 
@@ -184,6 +187,16 @@ export function ComputerDetailModal({
           <div className="flex items-center gap-2">
             {isOwner ? (
               <>
+                {onImportHwinfo ? (
+                  <button
+                    type="button"
+                    onClick={() => onImportHwinfo(rig)}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-cyan-500/35 bg-cyan-500/10 px-3 py-1.5 text-xs font-medium text-cyan-200 hover:bg-cyan-500/20"
+                  >
+                    <FileCode2 className="h-3.5 w-3.5 text-cyan-400" />
+                    Import HWiNFO
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   onClick={() => onEdit(rig)}

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { AlertCircle, Loader2, RefreshCw } from 'lucide-react';
 import { AiExportModal } from './components/AiExportModal';
 import { AuthModal } from './components/AuthModal';
@@ -6,9 +6,10 @@ import { BenchmarkModal } from './components/BenchmarkModal';
 import { ComparisonMatrixView } from './components/ComparisonMatrixView';
 import { ComputerDetailModal } from './components/ComputerDetailModal';
 import { ComputerFormModal } from './components/ComputerFormModal';
-import { CsvImportView } from './components/CsvImportView';
 import { HardwareLookupModal } from './components/HardwareLookupModal';
 import { Header } from './components/Header';
+import { HwinfoImportModal } from './components/HwinfoImportModal';
+import { ImportView } from './components/ImportView';
 import { InventoryView } from './components/InventoryView';
 import { PartFormModal } from './components/PartFormModal';
 import {
@@ -25,6 +26,12 @@ import {
   syncCompareParamsToUrl,
   type CompareState,
 } from './lib/compare';
+import type { InventoryCatalogContext } from './lib/hwinfoMatcher';
+import {
+  decodeHwinfoXmlFile,
+  parseHwinfoXml,
+  type ParsedHwinfoReport,
+} from './lib/hwinfoParser';
 import { PART_CATEGORY_META } from './lib/parts';
 import type { RefCpu, RefGpu, ReferenceItem } from './lib/referenceCatalog';
 import { computeFleetRankings } from './lib/scoring';
@@ -133,11 +140,69 @@ export function App() {
   const [editingLinksTarget, setEditingLinksTarget] =
     useState<PartLinksEditTarget | null>(null);
 
+  const [directHwinfoModal, setDirectHwinfoModal] = useState<{
+    rig: ComputerWithRelations;
+    report: ParsedHwinfoReport;
+  } | null>(null);
+  const directHwinfoInputRef = useRef<HTMLInputElement | null>(null);
+  const pendingImportTargetRigRef = useRef<ComputerWithRelations | null>(null);
+
   const [toast, setToast] = useState<string | null>(null);
 
   const showToast = (msg: string) => {
     setToast(msg);
     setTimeout(() => setToast(null), 3000);
+  };
+
+  const catalogContext = useMemo<InventoryCatalogContext>(
+    () => ({
+      computers: inventory.computers,
+      cpus: inventory.cpus,
+      gpus: inventory.gpus,
+      gpuCards: inventory.gpuCards,
+      motherboards: inventory.motherboards,
+      ramKits: inventory.ramKits,
+      storageDriveModels: inventory.storageDriveModels,
+      psus: inventory.psus,
+      cases: inventory.cases,
+      coolers: inventory.coolers,
+      wifiCards: inventory.wifiCards,
+    }),
+    [
+      inventory.computers,
+      inventory.cpus,
+      inventory.gpus,
+      inventory.gpuCards,
+      inventory.motherboards,
+      inventory.ramKits,
+      inventory.storageDriveModels,
+      inventory.psus,
+      inventory.cases,
+      inventory.coolers,
+      inventory.wifiCards,
+    ],
+  );
+
+  const handleDirectHwinfoFileChange = async (
+    e: ChangeEvent<HTMLInputElement>,
+  ) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    const targetRig = pendingImportTargetRigRef.current;
+    pendingImportTargetRigRef.current = null;
+    if (!file || !targetRig) return;
+
+    try {
+      const xml = await decodeHwinfoXmlFile(file);
+      const parsed = parseHwinfoXml(xml, file.name);
+      setDirectHwinfoModal({ rig: targetRig, report: parsed });
+    } catch (err) {
+      showToast(
+        err instanceof Error
+          ? err.message
+          : 'Failed to parse HWiNFO XML file.',
+      );
+    }
   };
 
   useEffect(() => {
@@ -407,13 +472,18 @@ export function App() {
             ) : null}
 
             {activeTab === 'import' ? (
-              <CsvImportView
+              <ImportView
+                catalog={catalogContext}
                 isOwner={auth.isOwner}
                 onOpenAuth={() => setAuthModalOpen(true)}
                 onImportComplete={async () => {
                   await inventory.refresh();
                   showToast('Inventory synced from CSV');
                 }}
+                onSelectRig={(rigId) => setSelectedRigId(rigId)}
+                onSelectTab={handleSelectTab}
+                onNotify={showToast}
+                saveComputer={inventory.saveComputer}
               />
             ) : null}
           </>
@@ -470,6 +540,38 @@ export function App() {
             .then(() => showToast('Benchmark deleted'))
         }
         onEditPartLinks={auth.isOwner ? setEditingLinksTarget : undefined}
+        onImportHwinfo={
+          auth.isOwner
+            ? (rig) => {
+                pendingImportTargetRigRef.current = rig;
+                directHwinfoInputRef.current?.click();
+              }
+            : undefined
+        }
+      />
+
+      <input
+        ref={directHwinfoInputRef}
+        type="file"
+        accept=".xml,text/xml,application/xml"
+        onChange={(e) => void handleDirectHwinfoFileChange(e)}
+        className="hidden"
+      />
+
+      <HwinfoImportModal
+        open={Boolean(directHwinfoModal)}
+        report={directHwinfoModal?.report ?? null}
+        lockedRig={directHwinfoModal?.rig ?? null}
+        catalog={catalogContext}
+        isOwner={auth.isOwner}
+        onOpenAuth={() => setAuthModalOpen(true)}
+        onClose={() => setDirectHwinfoModal(null)}
+        onApplySuccess={(result) => {
+          setDirectHwinfoModal(null);
+          setSelectedRigId(result.computerId);
+          showToast(`Updated ${result.rigName} from HWiNFO XML`);
+        }}
+        saveComputer={inventory.saveComputer}
       />
 
       <ComputerFormModal

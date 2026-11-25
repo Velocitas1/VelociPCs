@@ -46,7 +46,7 @@ Foundational parts-tracking architecture and automated hardware import to replac
 - [x] **Open-Source Hardware Dataset Dropdown Auto-Fill:**
   - Synced read-only static JSON reference catalog (`public/catalog/*.json` + `manifest.json`) built from `buildcores/buildcores-open-db`, `docyx/pc-part-dataset`, `RightNow-AI/RightNow-GPU-Database`, and `painebenjamin/dbgpu` via `scripts/sync-hardware-catalog.mjs` and a weekly GitHub Action (`.github/workflows/sync-hardware-catalog.yml`, triggering `.github/workflows/deploy.yml` on changes).
   - Lazy-loaded, cached client search (`src/lib/referenceCatalog.ts` + `src/components/ReferenceCatalogSearch.tsx`) powering instant auto-fill across `HardwareLookupModal` (with secondary `Live Web Enrich`), `PartFormModal` (including smart GPU card-to-chipset matching and non-destructive `Fill blanks only` edit mode), and inline `PartCombobox` / `CatalogPartCombobox` suggestions in `ComputerFormModal`.
-- [ ] **HWiNFO XML Hardware Report Importer:**
+- [x] **HWiNFO XML Hardware Report Importer:**
   - Build a client-side `DOMParser` importer for `HWiNFO32` / `HWiNFO64` XML reports (`Save Report -> XML` or CLI `-r`) covering Win 98 → Win 11 rigs (accessible in the Import tab and directly from `src/components/ComputerDetailModal.tsx`; supports direct owner login on modern rigs or USB/NAS XML file upload from retro rigs, while the 2 Linux machines remain manual).
   - Include fuzzy matching against existing `cpus`/`gpus`/variants (including PCI Subsystem IDs for AIB GPUs), an interactive diff/merge preview modal that preserves manual fields software cannot detect (PSU, build date, notes), and optional swap-to-spare updates when hardware changes are detected (zero RLS changes needed).
 - [ ] **AI Export Payload Enrichment:**

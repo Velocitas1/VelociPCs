@@ -1,7 +1,6 @@
 import {
   Cpu,
   Download,
-  FileSpreadsheet,
   Gamepad2,
   GitCompare,
   Lock,
@@ -9,6 +8,7 @@ import {
   Monitor,
   Plus,
   ShieldCheck,
+  Upload,
 } from 'lucide-react';
 import type { AppTab } from '../types/database';
 
@@ -29,7 +29,7 @@ const TABS: { id: AppTab; label: string; icon: typeof Monitor }[] = [
   { id: 'compare', label: 'Comparison Matrix', icon: GitCompare },
   { id: 'parts', label: 'Parts Catalog', icon: Cpu },
   { id: 'steam', label: 'Steam Compatibility', icon: Gamepad2 },
-  { id: 'import', label: 'CSV Import', icon: FileSpreadsheet },
+  { id: 'import', label: 'Import', icon: Upload },
 ];
 
 export function Header({
