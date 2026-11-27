@@ -845,3 +845,412 @@ export const COMPUTER_SLOT_META: Record<
     placeholder: 'https://... (optional RAM kit datasheet URL)',
   },
 };
+
+export type SmartLinkSlotId =
+  | 'intel_ark'
+  | 'amd_official'
+  | 'nvidia_official'
+  | 'tpu_cpu'
+  | 'tpu_gpu'
+  | 'tpu_ssd'
+  | 'tpu_aib'
+  | 'passmark_cpu'
+  | 'passmark_gpu'
+  | 'manufacturer'
+  | 'retro_web'
+  | 'manual_support'
+  | 'notebookcheck'
+  | 'cybenetics'
+  | 'drivers';
+
+export interface SmartLinkSlotDefinition {
+  id: SmartLinkSlotId;
+  label: string;
+  matchDomains?: string[];
+  matchPathHint?: string;
+  primaryPriority: number;
+  buildSearchUrl: (query: string, brand?: string) => string;
+}
+
+const KNOWN_DATABASE_DOMAINS = [
+  'techpowerup.com',
+  'cpubenchmark.net',
+  'videocardbenchmark.net',
+  'theretroweb.com',
+  'notebookcheck.net',
+  'cybenetics.com',
+  'clearesult.com',
+  'wikipedia.org',
+];
+
+function hostMatchesDomain(host: string, domain: string): boolean {
+  const target = domain.toLowerCase();
+  return host === target || host.endsWith(`.${target}`);
+}
+
+export function getSmartLinkSlots(
+  kind: PartLinkPresetKind,
+  brand?: string,
+): SmartLinkSlotDefinition[] {
+  const brandLower = (brand ?? '').trim().toLowerCase();
+
+  switch (kind) {
+    case 'cpu': {
+      const officialSlot: SmartLinkSlotDefinition = brandLower.includes('intel')
+        ? {
+            id: 'intel_ark',
+            label: 'Intel ARK',
+            matchDomains: ['intel.com'],
+            primaryPriority: 100,
+            buildSearchUrl: (q) =>
+              `https://www.intel.com/content/www/us/en/ark/search.html?_charset_=UTF-8&q=${encodeURIComponent(q.trim())}`,
+          }
+        : brandLower.includes('amd')
+          ? {
+              id: 'amd_official',
+              label: 'AMD Official',
+              matchDomains: ['amd.com'],
+              primaryPriority: 100,
+              buildSearchUrl: (q) =>
+                `https://www.amd.com/en/search/site-search.html#q=${encodeURIComponent(q.trim())}`,
+            }
+          : {
+              id: 'manufacturer',
+              label: 'Official Spec Page',
+              primaryPriority: 100,
+              buildSearchUrl: (q) =>
+                buildGoogleSearchUrl(`${q.trim()} CPU specifications`),
+            };
+
+      return [
+        officialSlot,
+        {
+          id: 'tpu_cpu',
+          label: 'TechPowerUp CPU DB',
+          matchDomains: ['techpowerup.com'],
+          matchPathHint: '/cpu-specs',
+          primaryPriority: 80,
+          buildSearchUrl: (q) =>
+            `https://www.techpowerup.com/cpu-specs/?q=${encodeURIComponent(q.trim())}`,
+        },
+        {
+          id: 'passmark_cpu',
+          label: 'PassMark CPU Mark',
+          matchDomains: ['cpubenchmark.net'],
+          primaryPriority: 60,
+          buildSearchUrl: (q) => buildPassMarkSearchUrl('cpu', '', q),
+        },
+      ];
+    }
+
+    case 'gpu': {
+      const officialSlot: SmartLinkSlotDefinition = brandLower.includes('nvidia')
+        ? {
+            id: 'nvidia_official',
+            label: 'NVIDIA Official',
+            matchDomains: ['nvidia.com'],
+            primaryPriority: 85,
+            buildSearchUrl: (q) =>
+              buildGoogleSearchUrl(`site:nvidia.com ${q.trim()}`),
+          }
+        : brandLower.includes('amd') || brandLower.includes('ati')
+          ? {
+              id: 'amd_official',
+              label: 'AMD Official',
+              matchDomains: ['amd.com'],
+              primaryPriority: 85,
+              buildSearchUrl: (q) =>
+                buildGoogleSearchUrl(`site:amd.com ${q.trim()}`),
+            }
+          : brandLower.includes('intel')
+            ? {
+                id: 'intel_ark',
+                label: 'Intel ARK',
+                matchDomains: ['intel.com'],
+                primaryPriority: 85,
+                buildSearchUrl: (q) =>
+                  `https://www.intel.com/content/www/us/en/ark/search.html?_charset_=UTF-8&q=${encodeURIComponent(q.trim())}`,
+              }
+            : {
+                id: 'manufacturer',
+                label: 'Official Spec Page',
+                primaryPriority: 85,
+                buildSearchUrl: (q) =>
+                  buildGoogleSearchUrl(`${q.trim()} GPU specifications`),
+              };
+
+      return [
+        {
+          id: 'tpu_gpu',
+          label: 'TechPowerUp GPU DB',
+          matchDomains: ['techpowerup.com'],
+          matchPathHint: '/gpu-specs',
+          primaryPriority: 100,
+          buildSearchUrl: (q) =>
+            `https://www.techpowerup.com/gpu-specs/?q=${encodeURIComponent(q.trim())}`,
+        },
+        officialSlot,
+        {
+          id: 'passmark_gpu',
+          label: 'PassMark G3D Mark',
+          matchDomains: ['videocardbenchmark.net'],
+          primaryPriority: 70,
+          buildSearchUrl: (q) => buildPassMarkSearchUrl('gpu', '', q),
+        },
+      ];
+    }
+
+    case 'gpu_aib':
+      return [
+        {
+          id: 'manufacturer',
+          label: 'Board Partner Datasheet',
+          primaryPriority: 100,
+          buildSearchUrl: (q) =>
+            buildGoogleSearchUrl(`${q.trim()} graphics card specifications`),
+        },
+        {
+          id: 'tpu_aib',
+          label: 'TechPowerUp AIB',
+          matchDomains: ['techpowerup.com'],
+          matchPathHint: '/gpu-specs',
+          primaryPriority: 80,
+          buildSearchUrl: (q) =>
+            `https://www.techpowerup.com/gpu-specs/?q=${encodeURIComponent(q.trim())}`,
+        },
+        {
+          id: 'manual_support',
+          label: 'Support / BIOS',
+          primaryPriority: 60,
+          buildSearchUrl: (q) =>
+            buildGoogleSearchUrl(`${q.trim()} support drivers bios`),
+        },
+      ];
+
+    case 'motherboard':
+      return [
+        {
+          id: 'manufacturer',
+          label: 'Manufacturer Page',
+          primaryPriority: 100,
+          buildSearchUrl: (q) =>
+            buildGoogleSearchUrl(`${q.trim()} motherboard specifications`),
+        },
+        {
+          id: 'retro_web',
+          label: 'The Retro Web',
+          matchDomains: ['theretroweb.com'],
+          primaryPriority: 80,
+          buildSearchUrl: (q) =>
+            `https://theretroweb.com/motherboards/?name=${encodeURIComponent(q.trim())}`,
+        },
+        {
+          id: 'manual_support',
+          label: 'Manual / Support',
+          primaryPriority: 60,
+          buildSearchUrl: (q) =>
+            buildGoogleSearchUrl(`${q.trim()} motherboard manual support`),
+        },
+      ];
+
+    case 'storage_drive':
+      return [
+        {
+          id: 'manufacturer',
+          label: 'Manufacturer Datasheet',
+          primaryPriority: 100,
+          buildSearchUrl: (q) =>
+            buildGoogleSearchUrl(`${q.trim()} SSD datasheet specifications`),
+        },
+        {
+          id: 'tpu_ssd',
+          label: 'TechPowerUp SSD DB',
+          matchDomains: ['techpowerup.com'],
+          matchPathHint: '/ssd-specs',
+          primaryPriority: 85,
+          buildSearchUrl: (q) =>
+            `https://www.techpowerup.com/ssd-specs/?q=${encodeURIComponent(q.trim())}`,
+        },
+      ];
+
+    case 'psu':
+      return [
+        {
+          id: 'manufacturer',
+          label: 'Manufacturer Datasheet',
+          primaryPriority: 100,
+          buildSearchUrl: (q) =>
+            buildGoogleSearchUrl(`${q.trim()} power supply specifications`),
+        },
+        {
+          id: 'cybenetics',
+          label: 'Cybenetics / 80 PLUS',
+          matchDomains: ['cybenetics.com', 'clearesult.com'],
+          primaryPriority: 80,
+          buildSearchUrl: (q) =>
+            buildGoogleSearchUrl(`site:cybenetics.com OR site:clearesult.com ${q.trim()}`),
+        },
+      ];
+
+    case 'ram':
+      return [
+        {
+          id: 'manufacturer',
+          label: 'Manufacturer Datasheet',
+          primaryPriority: 100,
+          buildSearchUrl: (q) =>
+            buildGoogleSearchUrl(`${q.trim()} RAM memory specifications`),
+        },
+      ];
+
+    case 'case':
+      return [
+        {
+          id: 'manufacturer',
+          label: 'Manufacturer Page',
+          primaryPriority: 100,
+          buildSearchUrl: (q) =>
+            buildGoogleSearchUrl(`${q.trim()} PC case specifications`),
+        },
+        {
+          id: 'manual_support',
+          label: 'Manual / Clearance',
+          primaryPriority: 70,
+          buildSearchUrl: (q) =>
+            buildGoogleSearchUrl(`${q.trim()} PC case manual`),
+        },
+      ];
+
+    case 'cooler':
+      return [
+        {
+          id: 'manufacturer',
+          label: 'Manufacturer Page',
+          primaryPriority: 100,
+          buildSearchUrl: (q) =>
+            buildGoogleSearchUrl(`${q.trim()} CPU cooler specifications`),
+        },
+        {
+          id: 'manual_support',
+          label: 'Support / Compatibility',
+          primaryPriority: 70,
+          buildSearchUrl: (q) =>
+            buildGoogleSearchUrl(`${q.trim()} CPU cooler manual socket support`),
+        },
+      ];
+
+    case 'wifi':
+      return [
+        brandLower.includes('intel')
+          ? {
+              id: 'intel_ark',
+              label: 'Intel ARK',
+              matchDomains: ['intel.com'],
+              primaryPriority: 100,
+              buildSearchUrl: (q) =>
+                `https://www.intel.com/content/www/us/en/ark/search.html?_charset_=UTF-8&q=${encodeURIComponent(q.trim())}`,
+            }
+          : {
+              id: 'manufacturer',
+              label: 'Manufacturer Datasheet',
+              primaryPriority: 100,
+              buildSearchUrl: (q) =>
+                buildGoogleSearchUrl(`${q.trim()} wireless adapter specifications`),
+            },
+        {
+          id: 'drivers',
+          label: 'Drivers / Support',
+          primaryPriority: 70,
+          buildSearchUrl: (q) =>
+            buildGoogleSearchUrl(`${q.trim()} wireless drivers support`),
+        },
+      ];
+
+    case 'laptop':
+      return [
+        {
+          id: 'manufacturer',
+          label: 'Manufacturer Specs',
+          primaryPriority: 100,
+          buildSearchUrl: (q) =>
+            buildGoogleSearchUrl(`${q.trim()} specifications support`),
+        },
+        {
+          id: 'notebookcheck',
+          label: 'Notebookcheck Review',
+          matchDomains: ['notebookcheck.net'],
+          primaryPriority: 85,
+          buildSearchUrl: (q) =>
+            buildGoogleSearchUrl(`site:notebookcheck.net ${q.trim()}`),
+        },
+        {
+          id: 'manual_support',
+          label: 'Support / Drivers',
+          primaryPriority: 60,
+          buildSearchUrl: (q) =>
+            buildGoogleSearchUrl(`${q.trim()} drivers manual support`),
+        },
+      ];
+  }
+}
+
+export function classifyUrlToSlot(
+  url: string,
+  label: string | undefined,
+  slots: SmartLinkSlotDefinition[],
+): SmartLinkSlotId | null {
+  const safe = getSafeHttpUrl(url);
+  if (!safe) return null;
+
+  const host = formatUrlHost(safe);
+  const lowerUrl = safe.toLowerCase();
+  const lowerLabel = (label ?? '').trim().toLowerCase();
+
+  // 1. Domain + optional path hint match
+  for (const slot of slots) {
+    if (!slot.matchDomains || slot.matchDomains.length === 0) continue;
+    const domainHit = slot.matchDomains.some((d) => hostMatchesDomain(host, d));
+    if (!domainHit) continue;
+    if (slot.matchPathHint && !lowerUrl.includes(slot.matchPathHint)) continue;
+    return slot.id;
+  }
+
+  // 2. Exact label match against slot label
+  if (lowerLabel) {
+    const labelMatch = slots.find(
+      (slot) => slot.label.toLowerCase() === lowerLabel,
+    );
+    if (labelMatch) return labelMatch.id;
+  }
+
+  // 3. Fallback: direct non-database vendor/support URLs map to support/drivers or manufacturer
+  if (!isSearchFallbackUrl(safe)) {
+    const isKnownDb = KNOWN_DATABASE_DOMAINS.some((d) =>
+      hostMatchesDomain(host, d),
+    );
+    if (!isKnownDb) {
+      if (
+        lowerLabel.includes('driver') &&
+        slots.some((s) => s.id === 'drivers')
+      ) {
+        return 'drivers';
+      }
+      if (
+        (lowerLabel.includes('manual') ||
+          lowerLabel.includes('support') ||
+          lowerLabel.includes('bios')) &&
+        slots.some((s) => s.id === 'manual_support')
+      ) {
+        return 'manual_support';
+      }
+      if (
+        !lowerLabel.includes('review') &&
+        slots.some((s) => s.id === 'manufacturer')
+      ) {
+        return 'manufacturer';
+      }
+    }
+  }
+
+  return null;
+}

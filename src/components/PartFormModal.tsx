@@ -1,7 +1,13 @@
-import { useEffect, useState, type FormEvent } from 'react';
-import { ExternalLink, Layers, Plus, Trash2, X } from 'lucide-react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { Layers, Plus, X } from 'lucide-react';
+import {
+  applySlotResultsFillBlanks,
+  lookupPartLinksAndSpecs,
+  type SlotLookupResult,
+} from '../lib/linkLookup';
 import {
   findReferenceGpuForChipset,
+  formatReferenceItemTitle,
   matchCanonicalGpuChip,
   type RefCooler,
   type RefGpu,
@@ -16,8 +22,7 @@ import {
 } from '../lib/referenceCatalog';
 import { PART_CATEGORY_META } from '../lib/parts';
 import {
-  getSafeHttpUrl,
-  PART_LINK_PRESETS,
+  getSmartLinkSlots,
   parseHttpUrl,
   type PartLinkPresetKind,
 } from '../lib/specLinks';
@@ -37,6 +42,7 @@ import type {
 } from '../types/database';
 import { PartCombobox } from './PartCombobox';
 import { ReferenceCatalogSearch } from './ReferenceCatalogSearch';
+import { SmartLinksEditor } from './SmartLinksEditor';
 
 interface PartFormModalProps {
   open: boolean;
@@ -161,8 +167,74 @@ export function PartFormModal({
   const [unmatchedChipset, setUnmatchedChipset] = useState<string | null>(null);
   const [matchingChipLoading, setMatchingChipLoading] = useState(false);
 
+  const [lookupLoading, setLookupLoading] = useState(false);
+  const [lookupNote, setLookupNote] = useState<string | null>(null);
+  const [lookupError, setLookupError] = useState<string | null>(null);
+  const [searchProvider, setSearchProvider] = useState<'serper' | 'brave' | 'free' | null>(null);
+  const [slotResults, setSlotResults] = useState<Record<string, SlotLookupResult>>({});
+  const lookupRequestIdRef = useRef(0);
+
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const presetKind = getPresetKind(category);
+
+  const handleAutoFindLinks = async (override?: {
+    query?: string;
+    brand?: string;
+    currentSpecUrl?: string;
+    currentSpecLinks?: Array<{ label: string; url: string }>;
+  }) => {
+    const effectiveBrand = (override?.brand ?? brand).trim();
+    const effectiveQuery = (
+      override?.query ?? `${brand} ${model}`.trim()
+    ).trim();
+    if (!effectiveQuery) return;
+
+    const requestId = ++lookupRequestIdRef.current;
+    setLookupLoading(true);
+    setLookupError(null);
+    setLookupNote(null);
+
+    try {
+      const slots = getSmartLinkSlots(presetKind, effectiveBrand).map((s) => s.id);
+      const data = await lookupPartLinksAndSpecs({
+        query: effectiveQuery,
+        partType: presetKind,
+        brand: effectiveBrand || undefined,
+        slots,
+      });
+      if (requestId !== lookupRequestIdRef.current) return;
+
+      setSlotResults(data.slotResults);
+      setSearchProvider(data.searchProvider);
+      setLookupNote(data.note);
+
+      const applied = applySlotResultsFillBlanks({
+        partKind: presetKind,
+        brand: effectiveBrand,
+        currentSpecUrl: override?.currentSpecUrl ?? specUrl,
+        currentSpecLinks: override?.currentSpecLinks ?? specLinks,
+        slotResults: data.slotResults,
+      });
+
+      if (applied.filledCount > 0) {
+        setSpecUrl(applied.specUrl);
+        setSpecLinks(applied.specLinks);
+      }
+    } catch (err) {
+      if (requestId !== lookupRequestIdRef.current) return;
+      setLookupError(
+        err instanceof Error
+          ? err.message
+          : 'Auto-lookup failed. Ensure you are signed in or paste links manually.',
+      );
+    } finally {
+      if (requestId === lookupRequestIdRef.current) {
+        setLookupLoading(false);
+      }
+    }
+  };
 
   const applyReferencePart = (
     item: ReferenceItem,
@@ -299,9 +371,15 @@ export function PartFormModal({
   };
 
   useEffect(() => {
+    lookupRequestIdRef.current += 1;
+    setLookupLoading(false);
     if (!open) return;
     setError(null);
     setUnmatchedChipset(null);
+    setLookupNote(null);
+    setLookupError(null);
+    setSearchProvider(null);
+    setSlotResults({});
 
     const resetCommon = (
       b: string,
@@ -357,6 +435,21 @@ export function PartFormModal({
 
       if (initialReferenceItem) {
         applyReferencePart(initialReferenceItem, 'replace');
+        const refBrand = String(
+          (initialReferenceItem as { brand?: string | null }).brand ?? '',
+        ).trim();
+        const refTitle = formatReferenceItemTitle(
+          category,
+          initialReferenceItem as never,
+        );
+        const refSpecUrl =
+          (initialReferenceItem as { spec_url?: string | null }).spec_url ?? '';
+        void handleAutoFindLinks({
+          query: refTitle,
+          brand: refBrand,
+          currentSpecUrl: refSpecUrl,
+          currentSpecLinks: [],
+        });
       }
       return;
     }
@@ -464,8 +557,6 @@ export function PartFormModal({
   if (!open) return null;
 
   const meta = PART_CATEGORY_META[category];
-  const presetKind = getPresetKind(category);
-  const presets = PART_LINK_PRESETS[presetKind];
   const brandOptional =
     category === 'ram_kit' || category === 'storage_drive_model';
 
@@ -508,9 +599,9 @@ export function PartFormModal({
       const row = specLinks[i];
       const lbl = row.label.trim();
       const rawUrl = row.url.trim();
-      if (!lbl && !rawUrl) continue;
+      if (!rawUrl) continue;
       if (!lbl) {
-        setError(`Extra link #${i + 1} needs a label.`);
+        setError(`Custom link #${i + 1} needs a label.`);
         return;
       }
       const parsed = parseHttpUrl(rawUrl);
@@ -676,7 +767,34 @@ export function PartFormModal({
             initialQuery={initialQuery}
             isEditing={Boolean(editingPart)}
             placeholder={`Search open-source ${meta.singular} catalog to auto-fill...`}
-            onSelect={(item, mode) => applyReferencePart(item, mode)}
+            onSelect={(item, mode) => {
+              applyReferencePart(item, mode);
+              const refBrand = String(
+                (item as { brand?: string | null }).brand ?? '',
+              ).trim();
+              const refTitle = formatReferenceItemTitle(
+                category,
+                item as never,
+              );
+              const refSpecUrl =
+                (item as { spec_url?: string | null }).spec_url ?? '';
+              const nextSpecUrl =
+                mode === 'fill_blanks'
+                  ? specUrl.trim()
+                    ? specUrl
+                    : refSpecUrl
+                  : refSpecUrl;
+              const nextSpecLinks = mode === 'replace' ? [] : specLinks;
+              if (mode === 'replace') {
+                setSpecLinks([]);
+              }
+              void handleAutoFindLinks({
+                query: refTitle,
+                brand: refBrand,
+                currentSpecUrl: nextSpecUrl,
+                currentSpecLinks: nextSpecLinks,
+              });
+            }}
           />
 
           {category === 'gpu_card' ? (
@@ -1219,109 +1337,31 @@ export function PartFormModal({
             </div>
           ) : null}
 
-          {/* Spec URL & Secondary Links */}
-          <div>
-            <label className="mb-1 flex items-center justify-between font-medium text-slate-300">
-              <span>Canonical Spec URL</span>
-              {getSafeHttpUrl(specUrl) ? (
-                <a
-                  href={getSafeHttpUrl(specUrl)!}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 text-cyan-300 hover:underline"
-                >
-                  Test link <ExternalLink className="h-3 w-3" />
-                </a>
-              ) : null}
-            </label>
-            <input
-              type="url"
-              value={specUrl}
-              onChange={(e) => setSpecUrl(e.target.value)}
-              placeholder="https://..."
-              className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-cyan-200"
-            />
-          </div>
-
-          <div className="space-y-2 rounded-xl border border-slate-800 bg-slate-950/50 p-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="text-[11px] font-semibold text-slate-300 uppercase">
-                Secondary Research Links ({specLinks.length})
-              </span>
-              <div className="flex flex-wrap items-center gap-1.5">
-                {presets.labelPresets.map((preset) => (
-                  <button
-                    key={preset}
-                    type="button"
-                    onClick={() =>
-                      setSpecLinks((prev) => [
-                        ...prev,
-                        { label: preset, url: '' },
-                      ])
-                    }
-                    className="rounded border border-slate-700/80 bg-slate-900 px-1.5 py-0.5 text-[10px] text-slate-300 hover:border-cyan-500/50 hover:text-cyan-200"
-                  >
-                    + {preset}
-                  </button>
-                ))}
-                <button
-                  type="button"
-                  onClick={() =>
-                    setSpecLinks((prev) => [...prev, { label: '', url: '' }])
-                  }
-                  className="inline-flex items-center gap-1 rounded-md border border-slate-700 bg-slate-900 px-2 py-0.5 text-[11px] font-medium text-slate-200 hover:border-cyan-500/50 hover:text-white"
-                >
-                  <Plus className="h-3 w-3 text-cyan-400" />
-                  Add Link
-                </button>
-              </div>
-            </div>
-
-            {specLinks.map((row, idx) => (
-              <div
-                key={idx}
-                className="grid items-center gap-2 sm:grid-cols-12"
-              >
-                <input
-                  type="text"
-                  value={row.label}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setSpecLinks((prev) =>
-                      prev.map((item, i) =>
-                        i === idx ? { ...item, label: val } : item,
-                      ),
-                    );
-                  }}
-                  placeholder="Label"
-                  className="rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-white sm:col-span-4"
-                />
-                <input
-                  type="url"
-                  value={row.url}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setSpecLinks((prev) =>
-                      prev.map((item, i) =>
-                        i === idx ? { ...item, url: val } : item,
-                      ),
-                    );
-                  }}
-                  placeholder="https://..."
-                  className="rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1.5 font-mono text-cyan-200 sm:col-span-7"
-                />
-                <button
-                  type="button"
-                  onClick={() =>
-                    setSpecLinks((prev) => prev.filter((_, i) => i !== idx))
-                  }
-                  className="flex justify-center rounded-lg p-1.5 text-slate-500 hover:bg-rose-500/15 hover:text-rose-300 sm:col-span-1"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            ))}
-          </div>
+          {/* Smart Spec & Research Links */}
+          <SmartLinksEditor
+            partKind={presetKind}
+            brand={brand}
+            query={`${brand} ${model}`.trim()}
+            specUrl={specUrl}
+            specLinks={specLinks}
+            onChange={(next) => {
+              setSpecUrl(next.specUrl);
+              setSpecLinks(next.specLinks);
+            }}
+            onRunAutoLookup={() =>
+              void handleAutoFindLinks({
+                query: `${brand} ${model}`.trim(),
+                brand,
+                currentSpecUrl: specUrl,
+                currentSpecLinks: specLinks,
+              })
+            }
+            lookupLoading={lookupLoading}
+            lookupNote={lookupNote}
+            lookupError={lookupError}
+            searchProvider={searchProvider}
+            slotResults={slotResults}
+          />
 
           <div>
             <label className="mb-1 block text-slate-400">Notes</label>

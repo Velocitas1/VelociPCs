@@ -1,53 +1,22 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { ExternalLink, Globe, X } from 'lucide-react';
 import {
-  ExternalLink,
-  Globe,
-  Loader2,
-  Plus,
-  Trash2,
-  X,
-} from 'lucide-react';
+  applySlotResultsFillBlanks,
+  lookupPartLinksAndSpecs,
+  type HardwareLookupResultItem,
+  type SlotLookupResult,
+} from '../lib/linkLookup';
 import {
   buildPassMarkSearchUrl,
   formatScoreUpdatedDate,
 } from '../lib/scoring';
-import { getSafeHttpUrl, parseHttpUrl, PART_LINK_PRESETS } from '../lib/specLinks';
+import { getSmartLinkSlots, parseHttpUrl } from '../lib/specLinks';
 import type { RefCpu, RefGpu } from '../lib/referenceCatalog';
-import { supabase } from '../lib/supabase';
 import type { Cpu, Gpu, SpecLinkItem } from '../types/database';
 import { ReferenceCatalogSearch } from './ReferenceCatalogSearch';
+import { SmartLinksEditor } from './SmartLinksEditor';
 
-interface LookupResultItem {
-  partType: 'cpu' | 'gpu';
-  name: string;
-  brand: string;
-  spec_url: string;
-  spec_links?: SpecLinkItem[];
-  source: string;
-  codename?: string | null;
-  socket?: string | null;
-  base_clock_ghz?: number | null;
-  turbo_clock_ghz?: number | null;
-  cache_mb?: number | null;
-  cores?: number | null;
-  threads?: number | null;
-  tdp_w?: number | null;
-  process_nm?: number | null;
-  max_memory_gb?: number | null;
-  memory_type?: string | null;
-  memory_speed_mhz?: number | null;
-  launch_date?: string | null;
-  is_mobile?: boolean;
-  architecture?: string | null;
-  vram_gb?: number | null;
-  vram_type?: string | null;
-  bus_interface?: string | null;
-  directx_version?: string | null;
-  directx_feature_level?: string | null;
-  category?: string | null;
-  passmark_score?: number | null;
-  summary?: string | null;
-}
+type LookupResultItem = HardwareLookupResultItem;
 
 interface HardwareLookupModalProps {
   open: boolean;
@@ -92,7 +61,11 @@ export function HardwareLookupModal({
   const [vendor, setVendor] = useState<'Auto' | 'Intel' | 'AMD' | 'NVIDIA'>('Auto');
   const [searching, setSearching] = useState(false);
   const [lookupNote, setLookupNote] = useState<string | null>(null);
+  const [lookupError, setLookupError] = useState<string | null>(null);
+  const [searchProvider, setSearchProvider] = useState<'serper' | 'brave' | 'free' | null>(null);
+  const [slotResults, setSlotResults] = useState<Record<string, SlotLookupResult>>({});
   const [results, setResults] = useState<LookupResultItem[]>([]);
+  const lookupRequestIdRef = useRef(0);
 
   // Shared editable form state
   const [name, setName] = useState('');
@@ -181,7 +154,40 @@ export function HardwareLookupModal({
     }
   };
 
-  const mergeLookupEnrichment = (item: LookupResultItem) => {
+  const applyLookupItem = (item: LookupResultItem) => {
+    setName(item.name);
+    setBrand(item.brand);
+    setSpecUrl(item.spec_url ?? '');
+    setSpecLinks((item.spec_links ?? []).map((l) => ({ ...l })));
+    setIsMobile(Boolean(item.is_mobile));
+    setTdpW(item.tdp_w?.toString() ?? '');
+    setProcessNm(item.process_nm?.toString() ?? '');
+    setPassmarkScore(item.passmark_score?.toString() ?? '');
+
+    if (partType === 'cpu') {
+      setCodename(item.codename ?? '');
+      setSocket(item.socket ?? '');
+      setBaseGhz(item.base_clock_ghz?.toString() ?? '');
+      setTurboGhz(item.turbo_clock_ghz?.toString() ?? '');
+      setCacheMb(item.cache_mb?.toString() ?? '');
+      setCores(item.cores?.toString() ?? '');
+      setThreads(item.threads?.toString() ?? '');
+      setMaxMemGb(item.max_memory_gb?.toString() ?? '');
+      setMemType(item.memory_type ?? '');
+      setMemSpeedMhz(item.memory_speed_mhz?.toString() ?? '');
+      setLaunchDate(item.launch_date ?? '');
+    } else {
+      setArchitecture(item.architecture ?? '');
+      setVramGb(item.vram_gb?.toString() ?? '');
+      setVramType(item.vram_type ?? '');
+      setBusInterface(item.bus_interface ?? '');
+      setDxVersion(item.directx_version ?? '');
+      setDxFeatureLevel(item.directx_feature_level ?? '');
+      setCategory(item.category ?? '');
+    }
+  };
+
+  const mergeLookupSpecsOnly = (item: LookupResultItem) => {
     const fill = (prev: string, nextVal: string | number | null | undefined) => {
       if (prev.trim()) return prev;
       return nextVal !== null && nextVal !== undefined ? String(nextVal) : '';
@@ -189,20 +195,9 @@ export function HardwareLookupModal({
 
     setBrand((prev) => (prev.trim() ? prev : item.brand));
     setName((prev) => (prev.trim() ? prev : item.name));
-    setSpecUrl((prev) => (prev.trim() ? prev : item.spec_url ?? ''));
     setPassmarkScore((prev) => fill(prev, item.passmark_score));
     setTdpW((prev) => fill(prev, item.tdp_w));
     setProcessNm((prev) => fill(prev, item.process_nm));
-
-    if (item.spec_links && item.spec_links.length > 0) {
-      setSpecLinks((prev) => {
-        const seen = new Set(prev.map((l) => l.url.trim()));
-        const additions = item.spec_links!.filter(
-          (l) => l.url && !seen.has(l.url),
-        );
-        return additions.length > 0 ? [...prev, ...additions] : prev;
-      });
-    }
 
     if (partType === 'cpu') {
       setCodename((prev) => fill(prev, item.codename));
@@ -227,10 +222,95 @@ export function HardwareLookupModal({
     }
   };
 
+  const handleLookup = async (override?: {
+    query?: string;
+    brand?: string;
+    currentSpecUrl?: string;
+    currentSpecLinks?: Array<{ label: string; url: string }>;
+    fillBlanksOnly?: boolean;
+  }) => {
+    const effectiveBrand = (override?.brand ?? brand).trim();
+    const searchTerm = (
+      override?.query ??
+      (query.trim() || `${brand} ${name}`.trim())
+    ).trim();
+    if (!searchTerm) return;
+
+    const requestId = ++lookupRequestIdRef.current;
+    setSearching(true);
+    setLookupError(null);
+    setLookupNote(null);
+
+    try {
+      const slots = getSmartLinkSlots(partType, effectiveBrand).map((s) => s.id);
+      const data = await lookupPartLinksAndSpecs({
+        query: searchTerm,
+        partType,
+        brand: effectiveBrand || undefined,
+        vendor,
+        slots,
+      });
+
+      if (requestId !== lookupRequestIdRef.current) return;
+
+      setResults(data.results);
+      setSlotResults(data.slotResults);
+      setSearchProvider(data.searchProvider);
+      setLookupNote(data.note);
+
+      const appliedLinks = applySlotResultsFillBlanks({
+        partKind: partType,
+        brand: effectiveBrand,
+        currentSpecUrl: override?.currentSpecUrl ?? specUrl,
+        currentSpecLinks: override?.currentSpecLinks ?? specLinks,
+        slotResults: data.slotResults,
+      });
+
+      if (appliedLinks.filledCount > 0) {
+        setSpecUrl(appliedLinks.specUrl);
+        setSpecLinks(appliedLinks.specLinks);
+      }
+
+      if (appliedLinks.passmarkScore !== null) {
+        setPassmarkScore((prev) =>
+          prev.trim() ? prev : String(appliedLinks.passmarkScore),
+        );
+      }
+
+      if (data.results.length > 0) {
+        if (override?.fillBlanksOnly || name.trim()) {
+          mergeLookupSpecsOnly(data.results[0]);
+        } else {
+          applyLookupItem(data.results[0]);
+          if (appliedLinks.filledCount > 0) {
+            setSpecUrl(appliedLinks.specUrl);
+            setSpecLinks(appliedLinks.specLinks);
+          }
+        }
+      }
+    } catch (err) {
+      if (requestId !== lookupRequestIdRef.current) return;
+      setLookupError(
+        err instanceof Error
+          ? err.message
+          : 'Auto-lookup failed. Ensure you are signed in or paste links manually below.',
+      );
+    } finally {
+      if (requestId === lookupRequestIdRef.current) {
+        setSearching(false);
+      }
+    }
+  };
+
   useEffect(() => {
+    lookupRequestIdRef.current += 1;
+    setSearching(false);
     if (!open) return;
     setError(null);
     setLookupNote(null);
+    setLookupError(null);
+    setSearchProvider(null);
+    setSlotResults({});
     setResults([]);
     setQuery(initialQuery);
 
@@ -303,9 +383,9 @@ export function HardwareLookupModal({
       setCategory('');
 
       if (initialReferenceItem) {
-        setQuery(
-          `${initialReferenceItem.brand} ${initialReferenceItem.name}`.trim(),
-        );
+        const refQuery =
+          `${initialReferenceItem.brand} ${initialReferenceItem.name}`.trim();
+        setQuery(refQuery);
         setName(initialReferenceItem.name);
         setBrand(initialReferenceItem.brand);
         setSpecUrl(initialReferenceItem.spec_url ?? '');
@@ -335,6 +415,14 @@ export function HardwareLookupModal({
           setDxFeatureLevel(g.directx_feature_level ?? '');
           setCategory(g.category ?? '');
         }
+
+        void handleLookup({
+          query: refQuery,
+          brand: initialReferenceItem.brand,
+          currentSpecUrl: initialReferenceItem.spec_url ?? '',
+          currentSpecLinks: [],
+          fillBlanksOnly: true,
+        });
       }
     }
   }, [
@@ -348,76 +436,6 @@ export function HardwareLookupModal({
   ]);
 
   if (!open) return null;
-
-  const applyLookupItem = (item: LookupResultItem) => {
-    setName(item.name);
-    setBrand(item.brand);
-    setSpecUrl(item.spec_url ?? '');
-    setSpecLinks((item.spec_links ?? []).map((l) => ({ ...l })));
-    setIsMobile(Boolean(item.is_mobile));
-    setTdpW(item.tdp_w?.toString() ?? '');
-    setProcessNm(item.process_nm?.toString() ?? '');
-    setPassmarkScore(item.passmark_score?.toString() ?? '');
-
-    if (partType === 'cpu') {
-      setCodename(item.codename ?? '');
-      setSocket(item.socket ?? '');
-      setBaseGhz(item.base_clock_ghz?.toString() ?? '');
-      setTurboGhz(item.turbo_clock_ghz?.toString() ?? '');
-      setCacheMb(item.cache_mb?.toString() ?? '');
-      setCores(item.cores?.toString() ?? '');
-      setThreads(item.threads?.toString() ?? '');
-      setMaxMemGb(item.max_memory_gb?.toString() ?? '');
-      setMemType(item.memory_type ?? '');
-      setMemSpeedMhz(item.memory_speed_mhz?.toString() ?? '');
-      setLaunchDate(item.launch_date ?? '');
-    } else {
-      setArchitecture(item.architecture ?? '');
-      setVramGb(item.vram_gb?.toString() ?? '');
-      setVramType(item.vram_type ?? '');
-      setBusInterface(item.bus_interface ?? '');
-      setDxVersion(item.directx_version ?? '');
-      setDxFeatureLevel(item.directx_feature_level ?? '');
-      setCategory(item.category ?? '');
-    }
-  };
-
-  const handleLookup = async () => {
-    const searchTerm = query.trim() || `${brand} ${name}`.trim();
-    if (!searchTerm) return;
-    setSearching(true);
-    setError(null);
-    setLookupNote(null);
-
-    try {
-      const { data, error: fnErr } = await supabase.functions.invoke(
-        'lookup-hardware-spec',
-        {
-          body: { query: searchTerm, partType, vendor },
-        },
-      );
-      if (fnErr) throw fnErr;
-
-      const items = (data?.results ?? []) as LookupResultItem[];
-      setResults(items);
-      setLookupNote(data?.note ?? null);
-      if (items.length > 0) {
-        if (name.trim()) {
-          mergeLookupEnrichment(items[0]);
-        } else {
-          applyLookupItem(items[0]);
-        }
-      }
-    } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : 'Live web enrich failed. Ensure you are signed in or use the instant Reference Catalog above.',
-      );
-    } finally {
-      setSearching(false);
-    }
-  };
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -442,7 +460,7 @@ export function HardwareLookupModal({
 
     const parsedSpecUrl = parseHttpUrl(specUrl);
     if (!parsedSpecUrl.valid) {
-      setError(`Canonical Spec URL: ${parsedSpecUrl.error}`);
+      setError(`Primary Spec URL: ${parsedSpecUrl.error}`);
       return;
     }
 
@@ -456,18 +474,14 @@ export function HardwareLookupModal({
       const row = specLinks[i];
       const lbl = row.label.trim();
       const rawUrl = row.url.trim();
-      if (!lbl && !rawUrl) continue;
+      if (!rawUrl) continue;
       if (!lbl) {
-        setError(`Secondary research link #${i + 1} needs a label.`);
-        return;
-      }
-      if (!rawUrl) {
-        setError(`Secondary research link "${lbl}" needs a URL.`);
+        setError(`Custom link #${i + 1} needs a label.`);
         return;
       }
       const parsed = parseHttpUrl(rawUrl);
       if (!parsed.valid || !parsed.normalizedUrl) {
-        setError(`Secondary research link "${lbl}": ${parsed.error}`);
+        setError(`Link "${lbl}": ${parsed.error}`);
         return;
       }
       if (seenUrls.has(parsed.normalizedUrl)) continue;
@@ -583,7 +597,7 @@ export function HardwareLookupModal({
         </div>
 
         <div className="space-y-5 overflow-y-auto p-5">
-          {/* Primary Instant Reference Catalog Auto-Fill + Secondary Live Web Enrich */}
+          {/* Primary Instant Reference Catalog Auto-Fill + Auto Link Lookup */}
           <div className="space-y-2.5">
             <ReferenceCatalogSearch
               category={partType}
@@ -597,57 +611,59 @@ export function HardwareLookupModal({
                   : 'e.g. GeForce RTX 4070 Super, Radeon RX 7800 XT, GeForce GTX 970'
               }
               onSelect={(item, mode) => {
-                applyReferenceItem(item as RefCpu | RefGpu, mode);
-                setQuery(`${item.brand} ${(item as RefCpu | RefGpu).name}`.trim());
+                const refItem = item as RefCpu | RefGpu;
+                const fullQuery = `${refItem.brand} ${refItem.name}`.trim();
+                const nextSpecUrl =
+                  mode === 'fill_blanks'
+                    ? specUrl.trim()
+                      ? specUrl
+                      : (refItem.spec_url ?? '')
+                    : (refItem.spec_url ?? '');
+                const nextSpecLinks = mode === 'replace' ? [] : specLinks;
+                if (mode === 'replace') {
+                  setSpecLinks([]);
+                }
+                applyReferenceItem(refItem, mode);
+                setQuery(fullQuery);
+                void handleLookup({
+                  query: fullQuery,
+                  brand: refItem.brand,
+                  currentSpecUrl: nextSpecUrl,
+                  currentSpecLinks: nextSpecLinks,
+                  fillBlanksOnly: true,
+                });
               }}
               extraAction={
-                <div className="flex items-center gap-2">
-                  <select
-                    value={vendor}
-                    onChange={(e) =>
-                      setVendor(
-                        e.target.value as 'Auto' | 'Intel' | 'AMD' | 'NVIDIA',
-                      )
-                    }
-                    className="rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-2 text-xs text-slate-200"
-                  >
-                    <option value="Auto">Auto Vendor</option>
-                    <option value="Intel">Intel</option>
-                    <option value="AMD">AMD</option>
-                    {partType === 'gpu' ? (
-                      <option value="NVIDIA">NVIDIA</option>
-                    ) : null}
-                  </select>
-                  <button
-                    type="button"
-                    onClick={() => void handleLookup()}
-                    disabled={searching}
-                    title="Fetch PassMark score and direct ARK/AMD/TechPowerUp links via Edge Function"
-                    className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-cyan-500/40 bg-slate-950 px-3 py-2 text-xs font-semibold text-cyan-300 hover:bg-cyan-500/15 disabled:opacity-60"
-                  >
-                    {searching ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <Globe className="h-3.5 w-3.5" />
-                    )}
-                    Live Web Enrich
-                  </button>
-                </div>
+                <select
+                  value={vendor}
+                  onChange={(e) =>
+                    setVendor(
+                      e.target.value as 'Auto' | 'Intel' | 'AMD' | 'NVIDIA',
+                    )
+                  }
+                  className="rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-2 text-xs text-slate-200"
+                >
+                  <option value="Auto">Auto Vendor</option>
+                  <option value="Intel">Intel</option>
+                  <option value="AMD">AMD</option>
+                  {partType === 'gpu' ? (
+                    <option value="NVIDIA">NVIDIA</option>
+                  ) : null}
+                </select>
               }
             />
 
-            {lookupNote ? (
-              <p className="px-1 text-xs text-slate-300">{lookupNote}</p>
-            ) : null}
-
-            {results.length > 0 ? (
-              <div className="flex flex-wrap gap-2 px-1">
+            {results.length > 1 ? (
+              <div className="flex flex-wrap items-center gap-1.5 px-1">
+                <span className="text-[11px] text-slate-500">
+                  Other spec matches:
+                </span>
                 {results.map((item, idx) => (
                   <button
                     key={`${item.name}-${idx}`}
                     type="button"
                     onClick={() => applyLookupItem(item)}
-                    className={`rounded-lg border px-2.5 py-1.5 text-left text-xs transition ${
+                    className={`rounded-lg border px-2 py-1 text-left text-[11px] transition ${
                       name === item.name
                         ? 'border-cyan-400 bg-cyan-500/20 text-white'
                         : 'border-slate-700 bg-slate-950 text-slate-300 hover:border-slate-500'
@@ -667,7 +683,7 @@ export function HardwareLookupModal({
 
           {/* Review & Edit Form */}
           <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="grid gap-3 sm:grid-cols-3">
+            <div className="grid gap-3 sm:grid-cols-4">
               <div>
                 <label className="mb-1 block text-xs font-medium text-slate-300">
                   Brand *
@@ -692,37 +708,12 @@ export function HardwareLookupModal({
                   className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white"
                 />
               </div>
-            </div>
-
-            <div className="grid gap-3 sm:grid-cols-3">
-              <div className="sm:col-span-2">
-                <label className="mb-1 flex items-center justify-between text-xs font-medium text-slate-300">
-                  <span>Canonical Spec URL (Intel ARK / AMD / TechPowerUp)</span>
-                  {getSafeHttpUrl(specUrl) ? (
-                    <a
-                      href={getSafeHttpUrl(specUrl)!}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 text-cyan-300 hover:underline"
-                    >
-                      Test link <ExternalLink className="h-3 w-3" />
-                    </a>
-                  ) : null}
-                </label>
-                <input
-                  type="url"
-                  value={specUrl}
-                  onChange={(e) => setSpecUrl(e.target.value)}
-                  placeholder="https://..."
-                  className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-xs text-cyan-200"
-                />
-              </div>
               <div>
                 <label className="mb-1 flex items-center justify-between gap-2 text-xs font-medium text-slate-300">
                   <span>
                     {partType === 'cpu'
-                      ? 'PassMark CPU Mark'
-                      : 'PassMark G3D Mark'}
+                      ? 'PassMark CPU'
+                      : 'PassMark G3D'}
                   </span>
                   {name.trim() ? (
                     <a
@@ -759,97 +750,33 @@ export function HardwareLookupModal({
               </div>
             </div>
 
-            {/* Secondary Research Links */}
-            <div className="space-y-2 rounded-xl border border-slate-800 bg-slate-950/50 p-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="text-[11px] font-semibold text-slate-300 uppercase">
-                  Secondary Research Links ({specLinks.length})
-                </span>
-                <div className="flex flex-wrap items-center gap-1.5">
-                  {PART_LINK_PRESETS[partType].labelPresets.map((preset) => (
-                    <button
-                      key={preset}
-                      type="button"
-                      onClick={() =>
-                        setSpecLinks((prev) => [
-                          ...prev,
-                          { label: preset, url: '' },
-                        ])
-                      }
-                      className="rounded border border-slate-700/80 bg-slate-900 px-1.5 py-0.5 text-[10px] text-slate-300 hover:border-cyan-500/50 hover:text-cyan-200"
-                    >
-                      + {preset}
-                    </button>
-                  ))}
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setSpecLinks((prev) => [...prev, { label: '', url: '' }])
-                    }
-                    className="inline-flex items-center gap-1 rounded-md border border-slate-700 bg-slate-900 px-2 py-0.5 text-[11px] font-medium text-slate-200 hover:border-cyan-500/50 hover:text-white"
-                  >
-                    <Plus className="h-3 w-3 text-cyan-400" />
-                    Add Link
-                  </button>
-                </div>
-              </div>
-
-              {specLinks.length === 0 ? (
-                <p className="text-[11px] text-slate-500">
-                  Optional direct links shown in the split-button dropdown (e.g. PassMark, TechPowerUp, official page). Search fallbacks remain automatic.
-                </p>
-              ) : (
-                <div className="space-y-2">
-                  {specLinks.map((row, idx) => (
-                    <div
-                      key={idx}
-                      className="grid items-center gap-2 sm:grid-cols-12"
-                    >
-                      <input
-                        type="text"
-                        value={row.label}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          setSpecLinks((prev) =>
-                            prev.map((item, i) =>
-                              i === idx ? { ...item, label: val } : item,
-                            ),
-                          );
-                        }}
-                        placeholder="Label (e.g. PassMark)"
-                        className="rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-xs text-white sm:col-span-4"
-                      />
-                      <input
-                        type="url"
-                        value={row.url}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          setSpecLinks((prev) =>
-                            prev.map((item, i) =>
-                              i === idx ? { ...item, url: val } : item,
-                            ),
-                          );
-                        }}
-                        placeholder="https://..."
-                        className="rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1.5 font-mono text-xs text-cyan-200 sm:col-span-7"
-                      />
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setSpecLinks((prev) =>
-                            prev.filter((_, i) => i !== idx),
-                          )
-                        }
-                        title="Remove link"
-                        className="flex justify-center rounded-lg p-1.5 text-slate-500 hover:bg-rose-500/15 hover:text-rose-300 sm:col-span-1"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+            <SmartLinksEditor
+              partKind={partType}
+              brand={brand}
+              query={query.trim() || `${brand} ${name}`.trim()}
+              specUrl={specUrl}
+              specLinks={specLinks}
+              onChange={(next) => {
+                setSpecUrl(next.specUrl);
+                setSpecLinks(next.specLinks);
+              }}
+              onRunAutoLookup={() =>
+                void handleLookup({
+                  query: `${brand} ${name}`.trim() || query.trim(),
+                  brand,
+                  currentSpecUrl: specUrl,
+                  currentSpecLinks: specLinks,
+                  fillBlanksOnly: true,
+                })
+              }
+              lookupLoading={searching}
+              lookupNote={lookupNote}
+              lookupError={lookupError}
+              searchProvider={searchProvider}
+              slotResults={slotResults}
+              onPassmarkMatched={(score) => setPassmarkScore(String(score))}
+              autoFindLabel="Auto-Find Links & Score"
+            />
 
             {partType === 'cpu' ? (
               <div className="grid gap-3 sm:grid-cols-4">

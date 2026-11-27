@@ -7,15 +7,49 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
+type LookupPartType =
+  | "cpu"
+  | "gpu"
+  | "gpu_aib"
+  | "motherboard"
+  | "ram"
+  | "storage_drive"
+  | "psu"
+  | "case"
+  | "cooler"
+  | "wifi"
+  | "laptop";
+
 interface LookupRequest {
   query?: string;
-  partType?: "cpu" | "gpu";
+  partType?: LookupPartType;
+  brand?: string;
   vendor?: "Intel" | "AMD" | "NVIDIA" | "Auto";
+  slots?: string[];
 }
 
 export interface SpecLinkItem {
   label: string;
   url: string;
+}
+
+export interface LinkCandidate {
+  url: string;
+  title: string;
+  source: string;
+  confidence: "high" | "medium";
+  passmark_score?: number | null;
+}
+
+export interface SlotLookupResult {
+  slotId: string;
+  label: string;
+  status: "found" | "ambiguous" | "not_found";
+  bestUrl: string | null;
+  bestTitle?: string | null;
+  confidence?: "high" | "medium";
+  source?: string | null;
+  candidates: LinkCandidate[];
 }
 
 export interface HardwareLookupResult {
@@ -1528,7 +1562,199 @@ function normalizeTokens(s: string): string[] {
     .filter(Boolean);
 }
 
-function inferBrand(query: string, vendor?: string): string {
+const VENDOR_NOISE_TOKENS = new Set([
+  "amd",
+  "nvidia",
+  "intel",
+  "ati",
+  "processor",
+  "processors",
+  "graphics",
+  "cpu",
+  "gpu",
+  "series",
+  "edition",
+  "card",
+  "video",
+  "with",
+]);
+
+const MODIFIER_TOKENS = new Set([
+  "ti",
+  "super",
+  "xt",
+  "xtx",
+  "gre",
+  "se",
+  "le",
+  "pro",
+  "max",
+  "ultra",
+  "mobile",
+  "laptop",
+  "maxq",
+  "x3d",
+  "ks",
+  "kf",
+  "k",
+  "f",
+  "x",
+  "g",
+  "hs",
+  "hx",
+  "hq",
+  "mq",
+  "u",
+  "m",
+  "oc",
+]);
+
+interface ModelSignature {
+  allTokens: string[];
+  meaningfulTokens: string[];
+  coreTokens: string[];
+  modifiers: Set<string>;
+  vramGb: number | null;
+  isMobile: boolean;
+}
+
+function parseModelSignature(raw: string): ModelSignature {
+  let vramGb: number | null = null;
+  const vramMatch = raw.match(/\b(\d{1,2})\s*gb\b/i);
+  if (vramMatch) {
+    vramGb = Number.parseInt(vramMatch[1], 10);
+  }
+
+  // Strip PassMark clock suffix like "@ 3.60GHz" and explicit VRAM capacity like "16 GB"
+  const stripped = raw
+    .replace(/@\s*\d+(?:\.\d+)?\s*ghz/gi, " ")
+    .replace(/\b\d{1,2}\s*gb\b/gi, " ")
+    .replace(/\bmax-q\b/gi, "maxq");
+
+  const allTokens = normalizeTokens(stripped);
+  const meaningfulTokens = allTokens.filter(
+    (t) => !VENDOR_NOISE_TOKENS.has(t),
+  );
+  const coreTokens = meaningfulTokens.filter((t) => /\d/.test(t));
+  const modifiers = new Set(
+    meaningfulTokens.filter((t) => MODIFIER_TOKENS.has(t)),
+  );
+  const isMobile =
+    /\b(mobile|laptop|max-q|maxq|hq|mq|hs|hx)\b/i.test(raw) ||
+    /\b\d{3,4}m\b/i.test(raw);
+
+  return {
+    allTokens,
+    meaningfulTokens,
+    coreTokens,
+    modifiers,
+    vramGb,
+    isMobile,
+  };
+}
+
+function scoreModelMatch(
+  candidateSig: ModelSignature,
+  querySig: ModelSignature,
+): number {
+  const qTokens =
+    querySig.meaningfulTokens.length > 0
+      ? querySig.meaningfulTokens
+      : querySig.allTokens;
+  if (qTokens.length === 0) return 0;
+
+  // Core model number tokens (e.g. "9060", "4070", "12400f", "7800x3d")
+  if (querySig.coreTokens.length > 0) {
+    for (const core of querySig.coreTokens) {
+      const exactCore = candidateSig.coreTokens.includes(core);
+      if (!exactCore) {
+        // Allow "12400f" vs "12400" only? No — exact model identifier should match,
+        // or prefix when query is "i5" vs "i5"
+        const partial = candidateSig.coreTokens.some(
+          (c) => c === core || (core.length >= 4 && c.startsWith(core) && c.length <= core.length + 1),
+        );
+        if (!partial) return -1;
+      }
+    }
+  }
+
+  let score = 0;
+  for (const qt of qTokens) {
+    if (candidateSig.meaningfulTokens.includes(qt)) {
+      score += /\d/.test(qt) ? 8 : 4;
+    } else if (candidateSig.allTokens.includes(qt)) {
+      score += 2;
+    } else if (
+      candidateSig.meaningfulTokens.some((c) => c.includes(qt) || qt.includes(c))
+    ) {
+      score += 1;
+    }
+  }
+
+  // Modifier alignment (Ti, Super, XT, XTX, GRE, Mobile, etc.)
+  for (const mod of querySig.modifiers) {
+    if (candidateSig.modifiers.has(mod)) score += 6;
+    else score -= 7;
+  }
+  for (const cMod of candidateSig.modifiers) {
+    if (!querySig.modifiers.has(cMod)) {
+      // Extra modifier on candidate (e.g. XT when query has no XT, or Ti when query has no Ti)
+      score -= 6;
+    }
+  }
+
+  // Mobile vs desktop alignment
+  if (querySig.isMobile !== candidateSig.isMobile) {
+    score -= 8;
+  }
+
+  // VRAM capacity tie-breaker bonus (doesn't disqualify PassMark names that omit VRAM)
+  if (querySig.vramGb !== null && candidateSig.vramGb !== null) {
+    if (querySig.vramGb === candidateSig.vramGb) score += 10;
+    else score -= 8;
+  }
+
+  // Prefer tighter candidate names without extra unrelated tokens
+  const extraTokens = Math.max(
+    0,
+    candidateSig.meaningfulTokens.length - qTokens.length,
+  );
+  score -= Math.min(5, extraTokens);
+
+  return score;
+}
+
+function isSearchOrListingUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.replace(/^www\./i, "").toLowerCase();
+    const path = parsed.pathname.toLowerCase();
+    const search = parsed.search.toLowerCase();
+    if (host.endsWith("google.com") || host.endsWith("bing.com") || host === "duckduckgo.com") {
+      return true;
+    }
+    if (path.includes("search.html") || path.includes("site-search") || path === "/search") {
+      return true;
+    }
+    if (
+      parsed.searchParams.has("q") ||
+      parsed.searchParams.has("s") ||
+      parsed.searchParams.has("ajaxsrch") ||
+      search.includes("search=")
+    ) {
+      return true;
+    }
+    if (host.endsWith("theretroweb.com") && !path.includes("/motherboards/s/")) {
+      return true;
+    }
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+function inferBrand(query: string, explicitBrand?: string, vendor?: string): string {
+  if (explicitBrand && explicitBrand.trim()) return explicitBrand.trim();
   if (vendor && vendor !== "Auto") return vendor;
   const q = query.toLowerCase();
   if (
@@ -1567,7 +1793,7 @@ function inferBrand(query: string, vendor?: string): string {
   ) {
     return "NVIDIA";
   }
-  return "Intel";
+  return "";
 }
 
 function buildOfficialSearchUrl(
@@ -1576,10 +1802,10 @@ function buildOfficialSearchUrl(
   partType: "cpu" | "gpu",
 ): string {
   const encoded = encodeURIComponent(query.trim());
-  if (brand === "Intel") {
+  if (brand.toLowerCase() === "intel") {
     return `https://www.intel.com/content/www/us/en/ark/search.html?_charset_=UTF-8&q=${encoded}`;
   }
-  if (brand === "AMD") {
+  if (brand.toLowerCase() === "amd") {
     return `https://www.amd.com/en/search/site-search.html#q=${encoded}`;
   }
   if (partType === "gpu") {
@@ -1630,7 +1856,8 @@ async function getDbGpuCatalog(): Promise<SlimDbGpu[]> {
             ? `${dxMajor}.${dxMinor}`
             : String(dxMajor)
           : null;
-      const mobileFlag = /\b(mobile|laptop|max-q|m)\b/i.test(name) ||
+      const mobileFlag =
+        /\b(mobile|laptop|max-q|m)\b/i.test(name) ||
         /\d{3,4}m\b/i.test(name);
       return {
         brand: manufacturer || inferBrand(name),
@@ -1678,7 +1905,7 @@ async function getPassMarkList(
 
   try {
     const res = await fetch(listUrl, {
-      signal: AbortSignal.timeout(4000),
+      signal: AbortSignal.timeout(4500),
       headers: { "User-Agent": "VelociPCs-Inventory/1.0" },
     });
     if (!res.ok) return existing?.items ?? [];
@@ -1723,23 +1950,53 @@ async function getPassMarkList(
   }
 }
 
-function findBestPassMarkMatch(
+function findPassMarkCandidates(
   entries: PassMarkEntry[],
-  queryTokens: string[],
-): PassMarkEntry | null {
-  if (entries.length === 0 || queryTokens.length === 0) return null;
-  let best: PassMarkEntry | null = null;
-  let bestScore = 0;
+  rawQuery: string,
+): {
+  best: PassMarkEntry | null;
+  status: "found" | "ambiguous" | "not_found";
+  candidates: LinkCandidate[];
+} {
+  if (entries.length === 0 || !rawQuery.trim()) {
+    return { best: null, status: "not_found", candidates: [] };
+  }
+
+  const querySig = parseModelSignature(rawQuery);
+  const scored: Array<{ entry: PassMarkEntry; score: number }> = [];
+  const minScore = querySig.coreTokens.length > 0 ? 6 : 8;
 
   for (const entry of entries) {
-    const score = scoreTokenOverlap(entry.tokens, queryTokens);
-    const minNeeded = queryTokens.length * 2;
-    if (score >= minNeeded && score > bestScore) {
-      bestScore = score;
-      best = entry;
+    const sig = parseModelSignature(entry.name);
+    const score = scoreModelMatch(sig, querySig);
+    if (score >= minScore) {
+      scored.push({ entry, score });
     }
   }
-  return best;
+
+  scored.sort((a, b) => b.score - a.score);
+  const top = scored.slice(0, 3);
+  if (top.length === 0) {
+    return { best: null, status: "not_found", candidates: [] };
+  }
+
+  const bestScore = top[0].score;
+  const secondScore = top[1]?.score ?? -999;
+  const isAmbiguous = top.length >= 2 && bestScore - secondScore <= 2;
+
+  const candidates: LinkCandidate[] = top.map((item, idx) => ({
+    url: item.entry.url,
+    title: item.entry.name,
+    source: "PassMark",
+    confidence: idx === 0 && !isAmbiguous ? "high" : "medium",
+    passmark_score: item.entry.score,
+  }));
+
+  return {
+    best: isAmbiguous ? null : top[0].entry,
+    status: isAmbiguous ? "ambiguous" : "found",
+    candidates,
+  };
 }
 
 function cleanWikitextValue(raw: string): string {
@@ -1820,7 +2077,9 @@ function extractSpecsFromInfobox(
 
     const sockRaw = box.sock ?? box.socket ?? box.sockets;
     if (sockRaw) {
-      const m = sockRaw.match(/\b(LGA\s*\d{3,4}|AM[2345]\+?|FM2\+?|SP[356]|sTRX\d|FP[678]|FCBGA\d+|FCPGA\d+|PGA\d+|Socket\s+[A-Z0-9]+)\b/i);
+      const m = sockRaw.match(
+        /\b(LGA\s*\d{3,4}|AM[2345]\+?|FM2\+?|SP[356]|sTRX\d|FP[678]|FCBGA\d+|FCPGA\d+|PGA\d+|Socket\s+[A-Z0-9]+)\b/i,
+      );
       if (m) out.socket = m[1].replace(/\s+/g, "").toUpperCase();
     }
 
@@ -1922,45 +2181,95 @@ function extractSpecsFromText(
   return out;
 }
 
+interface ClassifiedCanonicalLink {
+  slotId: string;
+  label: string;
+  url: string;
+  priority: number;
+  score: number;
+}
+
 function classifyCanonicalExtLinks(
   urls: string[],
-  queryTokens: string[],
-): Array<{ label: string; url: string; priority: number }> {
-  const found: Array<{ label: string; url: string; priority: number }> = [];
+  rawQuery: string,
+): ClassifiedCanonicalLink[] {
+  const querySig = parseModelSignature(rawQuery);
+  const found: ClassifiedCanonicalLink[] = [];
+  const seen = new Set<string>();
 
   for (const raw of urls) {
     const safe = sanitizeHttpUrl(raw);
-    if (!safe) continue;
+    if (!safe || isSearchOrListingUrl(safe) || seen.has(safe)) continue;
+    seen.add(safe);
     const lower = safe.toLowerCase();
 
+    let slotId = "";
+    let label = "";
+    let priority = 0;
+
     if (
-      (lower.includes("intel.com/content/www/us/en/products/sku/") ||
-        lower.includes("ark.intel.com/content/www/")) &&
-      !lower.includes("search.html")
+      lower.includes("intel.com/content/www/us/en/products/sku/") ||
+      lower.includes("ark.intel.com/content/www/")
     ) {
-      found.push({ label: "Intel ARK", url: safe, priority: 100 });
-    } else if (
-      lower.includes("amd.com/en/products/") &&
-      !lower.includes("site-search")
-    ) {
-      found.push({ label: "AMD Official", url: safe, priority: 100 });
+      slotId = "intel_ark";
+      label = "Intel ARK";
+      priority = 100;
+    } else if (lower.includes("amd.com/en/products/")) {
+      slotId = "amd_official";
+      label = "AMD Official";
+      priority = 100;
+    } else if (lower.includes("nvidia.com/en-us/geforce/") || lower.includes("nvidia.com/en-us/drivers")) {
+      slotId = "nvidia_official";
+      label = "NVIDIA Official";
+      priority = 85;
     } else if (lower.includes("techpowerup.com/gpu-specs/") && lower.includes(".c")) {
-      found.push({ label: "TechPowerUp GPU DB", url: safe, priority: 95 });
+      slotId = "tpu_gpu";
+      label = "TechPowerUp GPU DB";
+      priority = 95;
     } else if (lower.includes("techpowerup.com/cpu-specs/") && lower.includes(".c")) {
-      found.push({ label: "TechPowerUp CPU DB", url: safe, priority: 90 });
-    } else if (lower.includes("nvidia.com/en-us/geforce/")) {
-      found.push({ label: "NVIDIA Official", url: safe, priority: 85 });
+      slotId = "tpu_cpu";
+      label = "TechPowerUp CPU DB";
+      priority = 90;
+    } else if (lower.includes("techpowerup.com/ssd-specs/") && lower.includes(".c")) {
+      slotId = "tpu_ssd";
+      label = "TechPowerUp SSD DB";
+      priority = 90;
     } else if (lower.includes("cpubenchmark.net/cpu.php")) {
-      found.push({ label: "PassMark CPU Mark", url: safe, priority: 70 });
+      slotId = "passmark_cpu";
+      label = "PassMark CPU Mark";
+      priority = 70;
     } else if (lower.includes("videocardbenchmark.net/gpu.php")) {
-      found.push({ label: "PassMark G3D Mark", url: safe, priority: 70 });
+      slotId = "passmark_gpu";
+      label = "PassMark G3D Mark";
+      priority = 70;
+    } else if (lower.includes("notebookcheck.net/")) {
+      slotId = "notebookcheck";
+      label = "Notebookcheck Review";
+      priority = 80;
     }
+
+    if (!slotId) continue;
+
+    // Verify URL tokens against query core tokens so we don't pick a sibling SKU from an architecture Wikipedia page
+    const urlSig = parseModelSignature(safe.replace(/[/-_+.]/g, " "));
+    if (querySig.coreTokens.length > 0) {
+      const hasCoreMatch = querySig.coreTokens.some((core) =>
+        urlSig.allTokens.some((t) => t === core || t.includes(core)),
+      );
+      if (!hasCoreMatch && slotId !== "intel_ark") {
+        continue;
+      }
+    }
+
+    const overlap = scoreTokenOverlap(
+      urlSig.allTokens,
+      querySig.meaningfulTokens,
+    );
+    found.push({ slotId, label, url: safe, priority, score: overlap });
   }
 
   return found.sort((a, b) => {
-    const aMatch = scoreTokenOverlap(normalizeTokens(a.url), queryTokens);
-    const bMatch = scoreTokenOverlap(normalizeTokens(b.url), queryTokens);
-    if (bMatch !== aMatch) return bMatch - aMatch;
+    if (b.score !== a.score) return b.score - a.score;
     return b.priority - a.priority;
   });
 }
@@ -1968,61 +2277,72 @@ function classifyCanonicalExtLinks(
 async function queryWikipediaRich(
   query: string,
   brand: string,
-  partType: "cpu" | "gpu",
+  partType: LookupPartType,
 ): Promise<{
   specs: Partial<HardwareLookupResult>;
   summary: string;
-  canonicalLinks: Array<{ label: string; url: string; priority: number }>;
+  canonicalLinks: ClassifiedCanonicalLink[];
 } | null> {
+  if (partType !== "cpu" && partType !== "gpu" && partType !== "laptop") {
+    return null;
+  }
   try {
-    const searchQ = `${brand} ${query} ${partType === "cpu" ? "processor" : "graphics"}`;
-    const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(searchQ)}&srlimit=2&utf8=&format=json`;
+    const noun =
+      partType === "cpu"
+        ? "processor"
+        : partType === "gpu"
+          ? "graphics"
+          : "laptop";
+    const searchQ = `${brand} ${query} ${noun}`.trim();
+    const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(searchQ)}&srlimit=3&utf8=&format=json`;
     const searchRes = await fetch(searchUrl, {
       signal: AbortSignal.timeout(3500),
       headers: { "User-Agent": "VelociPCs-Inventory/1.0 (hardware lookup)" },
     });
     if (!searchRes.ok) return null;
     const searchJson = await searchRes.json();
-    const topTitle = searchJson?.query?.search?.[0]?.title as string | undefined;
-    if (!topTitle) return null;
+    const titles: string[] = (searchJson?.query?.search ?? [])
+      .map((s: { title?: string }) => s.title)
+      .filter((t: unknown): t is string => typeof t === "string" && t.length > 0);
+    if (titles.length === 0) return null;
 
-    const detailUrl = `https://en.wikipedia.org/w/api.php?action=query&prop=extracts|revisions|extlinks&exintro=1&explaintext=1&rvprop=content&rvslots=main&ellimit=100&titles=${encodeURIComponent(topTitle)}&format=json`;
+    const detailUrl = `https://en.wikipedia.org/w/api.php?action=query&prop=extracts|revisions|extlinks&exintro=1&explaintext=1&rvprop=content&rvslots=main&ellimit=150&titles=${encodeURIComponent(titles.join("|"))}&format=json`;
     const detailRes = await fetch(detailUrl, {
-      signal: AbortSignal.timeout(3500),
+      signal: AbortSignal.timeout(4000),
       headers: { "User-Agent": "VelociPCs-Inventory/1.0 (hardware lookup)" },
     });
     if (!detailRes.ok) return null;
     const detailJson = await detailRes.json();
-    const pages = detailJson?.query?.pages ?? {};
-    const firstPage = Object.values(pages)[0] as
-      | {
-          extract?: string;
-          revisions?: Array<{ slots?: { main?: { "*"?: string } } }>;
-          extlinks?: Array<{ "*"?: string }>;
-        }
-      | undefined;
+    const pages = Object.values(detailJson?.query?.pages ?? {}) as Array<{
+      title?: string;
+      extract?: string;
+      revisions?: Array<{ slots?: { main?: { "*"?: string } } }>;
+      extlinks?: Array<{ "*"?: string }>;
+    }>;
 
-    const summary = firstPage?.extract?.slice(0, 500) ?? "";
+    const primaryPage =
+      pages.find((p) => p.title === titles[0]) ?? pages[0];
+    const summary = primaryPage?.extract?.slice(0, 500) ?? "";
     const wikitext =
-      firstPage?.revisions?.[0]?.slots?.main?.["*"] ?? "";
-    const extUrls = (firstPage?.extlinks ?? [])
-      .map((e) => e["*"] ?? "")
-      .filter(Boolean);
+      primaryPage?.revisions?.[0]?.slots?.main?.["*"] ?? "";
 
-    const textSpecs = summary ? extractSpecsFromText(summary, partType) : {};
+    const allExtUrls: string[] = [];
+    for (const p of pages) {
+      for (const e of p.extlinks ?? []) {
+        if (e["*"]) allExtUrls.push(e["*"]);
+      }
+    }
+
+    const specPartType: "cpu" | "gpu" = partType === "gpu" ? "gpu" : "cpu";
+    const textSpecs = summary ? extractSpecsFromText(summary, specPartType) : {};
     const infoboxSpecs = wikitext
-      ? extractSpecsFromInfobox(parseWikipediaInfobox(wikitext), partType)
+      ? extractSpecsFromInfobox(parseWikipediaInfobox(wikitext), specPartType)
       : {};
 
-    const specs: Partial<HardwareLookupResult> = {
-      ...textSpecs,
-      ...infoboxSpecs,
-    };
+    const specs: Partial<HardwareLookupResult> =
+      partType === "laptop" ? {} : { ...textSpecs, ...infoboxSpecs };
 
-    const canonicalLinks = classifyCanonicalExtLinks(
-      extUrls,
-      normalizeTokens(query),
-    );
+    const canonicalLinks = classifyCanonicalExtLinks(allExtUrls, query);
 
     return { specs, summary, canonicalLinks };
   } catch {
@@ -2030,53 +2350,535 @@ async function queryWikipediaRich(
   }
 }
 
-async function queryDbGpuLive(
+async function queryDbGpuCandidates(
   query: string,
   brand: string,
-): Promise<HardwareLookupResult | null> {
+): Promise<{
+  best: HardwareLookupResult | null;
+  candidates: LinkCandidate[];
+  status: "found" | "ambiguous" | "not_found";
+}> {
   const items = await getDbGpuCatalog();
-  if (items.length === 0) return null;
-  const queryTokens = normalizeTokens(query);
-  if (queryTokens.length === 0) return null;
+  if (items.length === 0) {
+    return { best: null, candidates: [], status: "not_found" };
+  }
 
-  let best: SlimDbGpu | null = null;
-  let bestScore = 0;
+  const querySig = parseModelSignature(query);
+  if (querySig.allTokens.length === 0) {
+    return { best: null, candidates: [], status: "not_found" };
+  }
+
+  const scored: Array<{ item: SlimDbGpu; score: number }> = [];
+  const minScore = querySig.coreTokens.length > 0 ? 6 : 8;
 
   for (const item of items) {
-    let score = scoreTokenOverlap(item.tokens, queryTokens);
+    const sig = parseModelSignature(`${item.brand} ${item.name}`);
+    let score = scoreModelMatch(sig, querySig);
+    if (score < 0) continue;
     if (brand && item.brand.toLowerCase() === brand.toLowerCase()) {
       score += 2;
     }
-    if (
-      score >= Math.max(3, queryTokens.length * 2) &&
-      score > bestScore
-    ) {
-      bestScore = score;
-      best = item;
+    if (score >= minScore) {
+      scored.push({ item, score });
     }
   }
 
-  if (!best) return null;
-  const specUrl =
-    best.tpu_url ?? buildOfficialSearchUrl(best.name, best.brand, "gpu");
+  scored.sort((a, b) => b.score - a.score);
+  const top = scored.slice(0, 3);
+  if (top.length === 0) {
+    return { best: null, candidates: [], status: "not_found" };
+  }
 
-  return {
+  const bestScore = top[0].score;
+  const secondScore = top[1]?.score ?? -999;
+  const isAmbiguous = top.length >= 2 && bestScore - secondScore <= 2;
+
+  const candidates: LinkCandidate[] = [];
+  for (let i = 0; i < top.length; i += 1) {
+    const entry = top[i].item;
+    if (!entry.tpu_url) continue;
+    candidates.push({
+      url: entry.tpu_url,
+      title: `${entry.brand} ${entry.name}`.trim(),
+      source: "dbgpu",
+      confidence: i === 0 && !isAmbiguous ? "high" : "medium",
+    });
+  }
+
+  const topItem = top[0].item;
+  const specUrl =
+    topItem.tpu_url ?? buildOfficialSearchUrl(topItem.name, topItem.brand, "gpu");
+
+  const best: HardwareLookupResult = {
     partType: "gpu",
-    name: best.name,
-    brand: best.brand,
-    architecture: best.architecture,
-    vram_gb: best.vram_gb,
-    vram_type: best.vram_type,
-    bus_interface: best.bus_interface,
-    process_nm: best.process_nm,
-    tdp_w: best.tdp_w,
-    directx_version: best.directx_version,
-    is_mobile: best.is_mobile,
+    name: topItem.name,
+    brand: topItem.brand,
+    architecture: topItem.architecture,
+    vram_gb: topItem.vram_gb,
+    vram_type: topItem.vram_type,
+    bus_interface: topItem.bus_interface,
+    process_nm: topItem.process_nm,
+    tdp_w: topItem.tdp_w,
+    directx_version: topItem.directx_version,
+    is_mobile: topItem.is_mobile,
     spec_url: specUrl,
     source: "live",
-    confidence: best.tpu_url ? "high" : "medium",
-    summary: `Matched ${best.brand} ${best.name} from dbgpu open specification database.`,
+    confidence: topItem.tpu_url && !isAmbiguous ? "high" : "medium",
+    summary: `Matched ${topItem.brand} ${topItem.name} from dbgpu open specification database.`,
   };
+
+  return {
+    best,
+    candidates,
+    status:
+      candidates.length === 0
+        ? "not_found"
+        : isAmbiguous && candidates.length >= 2
+          ? "ambiguous"
+          : "found",
+  };
+}
+
+async function queryRetroWebMotherboards(
+  query: string,
+  brand: string,
+): Promise<LinkCandidate[]> {
+  const candidates: LinkCandidate[] = [];
+  const attempts = [query.trim()];
+  if (brand.trim()) {
+    const stripped = query
+      .replace(new RegExp(`^${brand.trim()}\\s+`, "i"), "")
+      .trim();
+    if (stripped && stripped !== query.trim()) attempts.push(stripped);
+  }
+
+  const querySig = parseModelSignature(query);
+
+  for (const term of attempts) {
+    try {
+      const res = await fetch(
+        `https://theretroweb.com/motherboards/?name=${encodeURIComponent(term)}`,
+        {
+          signal: AbortSignal.timeout(3500),
+          headers: { "User-Agent": "VelociPCs-Inventory/1.0" },
+        },
+      );
+      if (!res.ok) continue;
+      const html = await res.text();
+      const seen = new Set<string>();
+      const scored: Array<{ candidate: LinkCandidate; score: number }> = [];
+
+      const linkRe =
+        /href="(\/motherboards\/s\/[a-z0-9-]+)"[^>]*>([^<]{2,100})<\/a>/gi;
+      for (const m of html.matchAll(linkRe)) {
+        const path = m[1];
+        const title = m[2].replace(/\s+/g, " ").trim();
+        const url = `https://theretroweb.com${path}`;
+        if (seen.has(url) || !title) continue;
+        seen.add(url);
+        const sig = parseModelSignature(title);
+        const score = scoreModelMatch(sig, querySig);
+        if (score >= 0) {
+          scored.push({
+            candidate: {
+              url,
+              title,
+              source: "The Retro Web",
+              confidence: score >= 8 ? "high" : "medium",
+            },
+            score,
+          });
+        }
+      }
+
+      scored.sort((a, b) => b.score - a.score);
+      for (const s of scored.slice(0, 3)) {
+        candidates.push(s.candidate);
+      }
+      if (candidates.length > 0) break;
+    } catch {
+      // ignore timeout/network failure
+    }
+  }
+
+  return candidates;
+}
+
+const BLOCKED_RETAILER_DOMAINS = [
+  "google.com",
+  "bing.com",
+  "duckduckgo.com",
+  "amazon.",
+  "newegg.",
+  "ebay.",
+  "walmart.",
+  "bestbuy.",
+  "bhphotovideo.",
+  "microcenter.",
+  "pcpartpicker.com",
+  "reddit.com",
+  "youtube.com",
+  "facebook.com",
+  "twitter.com",
+  "x.com",
+  "wikipedia.org",
+  "userbenchmark.com",
+  "versus.com",
+  "nanoreview.net",
+];
+
+function getPartNoun(partType: LookupPartType): string {
+  switch (partType) {
+    case "cpu":
+      return "processor";
+    case "gpu":
+      return "graphics";
+    case "gpu_aib":
+      return "graphics card";
+    case "motherboard":
+      return "motherboard";
+    case "ram":
+      return "memory RAM";
+    case "storage_drive":
+      return "SSD drive";
+    case "psu":
+      return "power supply";
+    case "case":
+      return "PC case";
+    case "cooler":
+      return "CPU cooler";
+    case "wifi":
+      return "wireless adapter";
+    case "laptop":
+      return "laptop";
+  }
+}
+
+function buildSearchApiQuery(
+  slotId: string,
+  query: string,
+  brand: string,
+  partType: LookupPartType,
+): string {
+  const full = query.trim();
+  const noun = getPartNoun(partType);
+  switch (slotId) {
+    case "intel_ark":
+      return `site:intel.com/content/www/us/en/products/sku OR site:ark.intel.com ${full}`;
+    case "amd_official":
+      return `site:amd.com/en/products ${full}`;
+    case "nvidia_official":
+      return `site:nvidia.com ${full} specifications`;
+    case "tpu_cpu":
+      return `site:techpowerup.com/cpu-specs ${full}`;
+    case "tpu_gpu":
+    case "tpu_aib":
+      return `site:techpowerup.com/gpu-specs ${full}`;
+    case "tpu_ssd":
+      return `site:techpowerup.com/ssd-specs ${full}`;
+    case "passmark_cpu":
+      return `site:cpubenchmark.net/cpu.php ${full}`;
+    case "passmark_gpu":
+      return `site:videocardbenchmark.net/gpu.php ${full}`;
+    case "retro_web":
+      return `site:theretroweb.com/motherboards/s ${full}`;
+    case "notebookcheck":
+      return `site:notebookcheck.net ${full}`;
+    case "cybenetics":
+      return `(site:cybenetics.com OR site:clearesult.com) ${full}`;
+    case "manual_support":
+      return `${brand ? `${brand} ` : ""}${full} ${noun} manual support`;
+    case "drivers":
+      return `${brand ? `${brand} ` : ""}${full} drivers support`;
+    default:
+      return `${brand ? `${brand} ` : ""}${full} ${noun} specifications`;
+  }
+}
+
+function urlMatchesSlotExpectation(slotId: string, url: string): boolean {
+  const lower = url.toLowerCase();
+  if (isSearchOrListingUrl(url)) return false;
+  let host = "";
+  try {
+    host = new URL(url).hostname.replace(/^www\./i, "").toLowerCase();
+  } catch {
+    return false;
+  }
+
+  for (const blocked of BLOCKED_RETAILER_DOMAINS) {
+    if (host.includes(blocked)) return false;
+  }
+
+  switch (slotId) {
+    case "intel_ark":
+      return (
+        host.endsWith("intel.com") &&
+        (lower.includes("/products/sku/") || lower.includes("ark.intel.com"))
+      );
+    case "amd_official":
+      return host.endsWith("amd.com") && lower.includes("/products/");
+    case "nvidia_official":
+      return host.endsWith("nvidia.com");
+    case "tpu_cpu":
+      return host.endsWith("techpowerup.com") && lower.includes("/cpu-specs/");
+    case "tpu_gpu":
+    case "tpu_aib":
+      return host.endsWith("techpowerup.com") && lower.includes("/gpu-specs/");
+    case "tpu_ssd":
+      return host.endsWith("techpowerup.com") && lower.includes("/ssd-specs/");
+    case "passmark_cpu":
+      return host.endsWith("cpubenchmark.net") && lower.includes("cpu.php");
+    case "passmark_gpu":
+      return host.endsWith("videocardbenchmark.net") && lower.includes("gpu.php");
+    case "retro_web":
+      return (
+        host.endsWith("theretroweb.com") &&
+        lower.includes("/motherboards/s/")
+      );
+    case "notebookcheck":
+      return host.endsWith("notebookcheck.net");
+    case "cybenetics":
+      return host.endsWith("cybenetics.com") || host.endsWith("clearesult.com");
+    default:
+      return true;
+  }
+}
+
+async function runSerperOrBraveSearch(
+  searchQuery: string,
+  serperKey: string | undefined,
+  braveKey: string | undefined,
+): Promise<Array<{ url: string; title: string; provider: string }>> {
+  if (serperKey) {
+    try {
+      const res = await fetch("https://google.serper.dev/search", {
+        method: "POST",
+        signal: AbortSignal.timeout(4000),
+        headers: {
+          "X-API-KEY": serperKey,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ q: searchQuery, num: 5 }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const organic = (data?.organic ?? []) as Array<{
+          link?: string;
+          title?: string;
+        }>;
+        return organic
+          .filter((r) => r.link)
+          .map((r) => ({
+            url: r.link!,
+            title: r.title ?? r.link!,
+            provider: "Serper",
+          }));
+      }
+    } catch {
+      // fall through
+    }
+  }
+
+  if (braveKey) {
+    try {
+      const res = await fetch(
+        `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(searchQuery)}&count=5`,
+        {
+          signal: AbortSignal.timeout(4000),
+          headers: {
+            "X-Subscription-Token": braveKey,
+            Accept: "application/json",
+          },
+        },
+      );
+      if (res.ok) {
+        const data = await res.json();
+        const results = (data?.web?.results ?? []) as Array<{
+          url?: string;
+          title?: string;
+        }>;
+        return results
+          .filter((r) => r.url)
+          .map((r) => ({
+            url: r.url!,
+            title: r.title ?? r.url!,
+            provider: "Brave Search",
+          }));
+      }
+    } catch {
+      // fall through
+    }
+  }
+
+  return [];
+}
+
+async function searchWebForSlot(
+  slotId: string,
+  slotLabel: string,
+  query: string,
+  brand: string,
+  partType: LookupPartType,
+  serperKey: string | undefined,
+  braveKey: string | undefined,
+): Promise<SlotLookupResult> {
+  const searchQ = buildSearchApiQuery(slotId, query, brand, partType);
+  const rawResults = await runSerperOrBraveSearch(searchQ, serperKey, braveKey);
+  const querySig = parseModelSignature(query);
+  const brandLower = brand.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+
+  const scored: Array<{ candidate: LinkCandidate; score: number }> = [];
+  const seen = new Set<string>();
+
+  for (const r of rawResults) {
+    const safe = sanitizeHttpUrl(r.url);
+    if (!safe || seen.has(safe)) continue;
+    if (!urlMatchesSlotExpectation(slotId, safe)) continue;
+    seen.add(safe);
+
+    const titleSig = parseModelSignature(`${r.title} ${safe.replace(/[/-_+.]/g, " ")}`);
+    let score = scoreTokenOverlap(titleSig.allTokens, querySig.meaningfulTokens);
+    if (querySig.coreTokens.length > 0) {
+      const matchedCore = querySig.coreTokens.filter((c) =>
+        titleSig.allTokens.some((t) => t === c || t.includes(c)),
+      );
+      if (matchedCore.length === 0) continue;
+      score += matchedCore.length * 6;
+    }
+
+    if (brandLower) {
+      try {
+        const host = new URL(safe).hostname.toLowerCase().replace(/[^a-z0-9]/g, "");
+        if (host.includes(brandLower)) score += 8;
+      } catch {
+        // ignore
+      }
+    }
+
+    scored.push({
+      candidate: {
+        url: safe,
+        title: r.title.slice(0, 90),
+        source: r.provider,
+        confidence: score >= 10 ? "high" : "medium",
+      },
+      score,
+    });
+  }
+
+  scored.sort((a, b) => b.score - a.score);
+  const top = scored.slice(0, 3);
+  if (top.length === 0) {
+    return {
+      slotId,
+      label: slotLabel,
+      status: "not_found",
+      bestUrl: null,
+      candidates: [],
+    };
+  }
+
+  const bestScore = top[0].score;
+  const secondScore = top[1]?.score ?? -999;
+  const isAmbiguous = top.length >= 2 && bestScore - secondScore <= 2 && bestScore < 14;
+
+  return {
+    slotId,
+    label: slotLabel,
+    status: isAmbiguous ? "ambiguous" : "found",
+    bestUrl: isAmbiguous ? null : top[0].candidate.url,
+    bestTitle: isAmbiguous ? null : top[0].candidate.title,
+    confidence: top[0].candidate.confidence,
+    source: top[0].candidate.source,
+    candidates: top.map((t) => t.candidate),
+  };
+}
+
+const SLOT_LABELS: Record<string, string> = {
+  intel_ark: "Intel ARK",
+  amd_official: "AMD Official",
+  nvidia_official: "NVIDIA Official",
+  tpu_cpu: "TechPowerUp CPU DB",
+  tpu_gpu: "TechPowerUp GPU DB",
+  tpu_ssd: "TechPowerUp SSD DB",
+  tpu_aib: "TechPowerUp AIB",
+  passmark_cpu: "PassMark CPU Mark",
+  passmark_gpu: "PassMark G3D Mark",
+  manufacturer: "Manufacturer Page",
+  retro_web: "The Retro Web",
+  manual_support: "Manual / Support",
+  notebookcheck: "Notebookcheck Review",
+  cybenetics: "Cybenetics / 80 PLUS",
+  drivers: "Drivers / Support",
+};
+
+function classifyUrlSlotId(url: string): string | null {
+  const lower = url.toLowerCase();
+  if (isSearchOrListingUrl(url)) return null;
+  if (lower.includes("intel.com") && (lower.includes("/products/sku/") || lower.includes("ark.intel.com"))) {
+    return "intel_ark";
+  }
+  if (lower.includes("amd.com/en/products/")) return "amd_official";
+  if (lower.includes("nvidia.com")) return "nvidia_official";
+  if (lower.includes("techpowerup.com/cpu-specs/")) return "tpu_cpu";
+  if (lower.includes("techpowerup.com/gpu-specs/")) return "tpu_gpu";
+  if (lower.includes("techpowerup.com/ssd-specs/")) return "tpu_ssd";
+  if (lower.includes("cpubenchmark.net/cpu.php")) return "passmark_cpu";
+  if (lower.includes("videocardbenchmark.net/gpu.php")) return "passmark_gpu";
+  if (lower.includes("theretroweb.com/motherboards/s/")) return "retro_web";
+  if (lower.includes("notebookcheck.net/")) return "notebookcheck";
+  if (lower.includes("cybenetics.com") || lower.includes("clearesult.com")) {
+    return "cybenetics";
+  }
+  return null;
+}
+
+function getDefaultSlotsForPart(
+  partType: LookupPartType,
+  brand: string,
+): string[] {
+  const b = brand.toLowerCase();
+  switch (partType) {
+    case "cpu":
+      return [
+        b.includes("intel")
+          ? "intel_ark"
+          : b.includes("amd")
+            ? "amd_official"
+            : "manufacturer",
+        "tpu_cpu",
+        "passmark_cpu",
+      ];
+    case "gpu":
+      return [
+        "tpu_gpu",
+        b.includes("nvidia")
+          ? "nvidia_official"
+          : b.includes("amd") || b.includes("ati")
+            ? "amd_official"
+            : b.includes("intel")
+              ? "intel_ark"
+              : "manufacturer",
+        "passmark_gpu",
+      ];
+    case "gpu_aib":
+      return ["manufacturer", "tpu_aib", "manual_support"];
+    case "motherboard":
+      return ["manufacturer", "retro_web", "manual_support"];
+    case "storage_drive":
+      return ["manufacturer", "tpu_ssd"];
+    case "psu":
+      return ["manufacturer", "cybenetics"];
+    case "ram":
+      return ["manufacturer"];
+    case "case":
+    case "cooler":
+      return ["manufacturer", "manual_support"];
+    case "wifi":
+      return [b.includes("intel") ? "intel_ark" : "manufacturer", "drivers"];
+    case "laptop":
+      return ["manufacturer", "notebookcheck", "manual_support"];
+  }
 }
 
 Deno.serve(async (req: Request) => {
@@ -2087,14 +2889,16 @@ Deno.serve(async (req: Request) => {
   try {
     const body = (await req.json().catch(() => ({}))) as LookupRequest;
     const rawQuery = (body.query ?? "").trim();
-    const partType: "cpu" | "gpu" = body.partType === "gpu" ? "gpu" : "cpu";
+    const partType: LookupPartType = body.partType ?? "cpu";
 
     if (!rawQuery) {
       return new Response(
         JSON.stringify({
           results: [],
+          slotResults: {},
+          searchProvider: "free",
           source: "catalog",
-          note: "Enter a CPU or GPU model name (e.g., Ryzen 7 7800X3D, Core i5-12400F, RTX 4070).",
+          note: "Enter a brand and model name to search for specs and direct links.",
         }),
         {
           status: 400,
@@ -2103,9 +2907,62 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    const brand = inferBrand(rawQuery, body.vendor);
+    const serperKey = Deno.env.get("SERPER_API_KEY") || undefined;
+    const braveKey = Deno.env.get("BRAVE_SEARCH_API_KEY") || undefined;
+    const searchProvider: "serper" | "brave" | "free" = serperKey
+      ? "serper"
+      : braveKey
+        ? "brave"
+        : "free";
+
+    const brand = inferBrand(rawQuery, body.brand, body.vendor);
+    const requestedSlots =
+      Array.isArray(body.slots) && body.slots.length > 0
+        ? body.slots
+        : getDefaultSlotsForPart(partType, brand);
+
+    const slotResults: Record<string, SlotLookupResult> = {};
+    for (const slotId of requestedSlots) {
+      slotResults[slotId] = {
+        slotId,
+        label: SLOT_LABELS[slotId] ?? slotId,
+        status: "not_found",
+        bestUrl: null,
+        candidates: [],
+      };
+    }
+
+    const setSlotFound = (
+      slotId: string,
+      candidate: LinkCandidate,
+      extraCandidates?: LinkCandidate[],
+    ) => {
+      if (!slotResults[slotId]) return;
+      const existing = slotResults[slotId];
+      if (existing.status === "found" && existing.bestUrl) return;
+      slotResults[slotId] = {
+        slotId,
+        label: existing.label,
+        status: "found",
+        bestUrl: candidate.url,
+        bestTitle: candidate.title,
+        confidence: candidate.confidence,
+        source: candidate.source,
+        candidates:
+          extraCandidates && extraCandidates.length > 0
+            ? extraCandidates
+            : [candidate],
+      };
+    };
+
     const queryTokens = normalizeTokens(rawQuery);
-    const pool = partType === "cpu" ? CPU_CATALOG : GPU_CATALOG;
+    const isChipLookup = partType === "cpu" || partType === "gpu";
+    const pool =
+      partType === "cpu"
+        ? CPU_CATALOG
+        : partType === "gpu"
+          ? GPU_CATALOG
+          : [];
 
     const rankedCatalog = pool
       .map((item) => ({ item, score: scoreCatalogMatch(item, queryTokens) }))
@@ -2120,122 +2977,289 @@ Deno.serve(async (req: Request) => {
         ),
       }));
 
-    if (
+    // Seed slotResults from exact catalog entry if available
+    const exactCatalogHit =
       rankedCatalog.length > 0 &&
-      rankedCatalog[0].name.toLowerCase() === rawQuery.toLowerCase()
-    ) {
-      return new Response(
-        JSON.stringify({
-          results: rankedCatalog,
-          source: "catalog",
-          note: "Matched official verified specification entry with canonical datasheet and research links.",
-        }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
+      (rankedCatalog[0].name.toLowerCase() === rawQuery.toLowerCase() ||
+        `${rankedCatalog[0].brand} ${rankedCatalog[0].name}`.toLowerCase() ===
+          rawQuery.toLowerCase())
+        ? rankedCatalog[0]
+        : null;
+
+    if (exactCatalogHit) {
+      const catalogLinks: Array<{ url: string; label: string }> = [
+        { url: exactCatalogHit.spec_url, label: exactCatalogHit.name },
+        ...(exactCatalogHit.spec_links ?? []),
+      ];
+      for (const link of catalogLinks) {
+        const sid = classifyUrlSlotId(link.url);
+        if (sid && slotResults[sid]) {
+          setSlotFound(sid, {
+            url: link.url,
+            title: `${exactCatalogHit.brand} ${exactCatalogHit.name}`.trim(),
+            source: "Catalog",
+            confidence: "high",
+            passmark_score:
+              sid === "passmark_cpu" || sid === "passmark_gpu"
+                ? exactCatalogHit.passmark_score ?? null
+                : undefined,
+          });
+        }
+      }
     }
 
-    const [wikiRes, pmList, dbGpuMatch] = await Promise.all([
-      queryWikipediaRich(rawQuery, brand, partType),
-      getPassMarkList(partType),
-      partType === "gpu" ? queryDbGpuLive(rawQuery, brand) : Promise.resolve(null),
+    // Run free structured lookups in parallel for any unresolved slots
+    const needWiki =
+      partType === "cpu" || partType === "gpu" || partType === "laptop";
+    const needPassMark =
+      (partType === "cpu" &&
+        slotResults.passmark_cpu?.status !== "found") ||
+      (partType === "gpu" &&
+        slotResults.passmark_gpu?.status !== "found");
+    const needDbGpu =
+      partType === "gpu" && slotResults.tpu_gpu?.status !== "found";
+    const needRetroWeb =
+      partType === "motherboard" && slotResults.retro_web?.status !== "found";
+
+    const [wikiRes, pmList, dbGpuRes, retroCandidates] = await Promise.all([
+      needWiki ? queryWikipediaRich(rawQuery, brand, partType) : Promise.resolve(null),
+      needPassMark
+        ? getPassMarkList(partType === "gpu" ? "gpu" : "cpu")
+        : Promise.resolve([]),
+      needDbGpu
+        ? queryDbGpuCandidates(rawQuery, brand)
+        : Promise.resolve({
+            best: null,
+            candidates: [] as LinkCandidate[],
+            status: "not_found" as const,
+          }),
+      needRetroWeb
+        ? queryRetroWebMotherboards(rawQuery, brand)
+        : Promise.resolve([] as LinkCandidate[]),
     ]);
 
-    const pmMatch = findBestPassMarkMatch(pmList, queryTokens);
+    // Populate PassMark slot
+    const pmMatch = needPassMark
+      ? findPassMarkCandidates(pmList, rawQuery)
+      : { best: null, status: "not_found" as const, candidates: [] as LinkCandidate[] };
+
+    if (needPassMark) {
+      const pmSlotId = partType === "gpu" ? "passmark_gpu" : "passmark_cpu";
+      if (slotResults[pmSlotId]) {
+        slotResults[pmSlotId] = {
+          slotId: pmSlotId,
+          label: slotResults[pmSlotId].label,
+          status: pmMatch.status,
+          bestUrl: pmMatch.best?.url ?? null,
+          bestTitle: pmMatch.best?.name ?? null,
+          confidence: pmMatch.best ? "high" : pmMatch.candidates.length > 0 ? "medium" : undefined,
+          source: pmMatch.candidates.length > 0 ? "PassMark" : null,
+          candidates: pmMatch.candidates,
+        };
+      }
+    }
+
+    // Populate TechPowerUp GPU DB slot from dbgpu
+    if (needDbGpu && slotResults.tpu_gpu && dbGpuRes.candidates.length > 0) {
+      slotResults.tpu_gpu = {
+        slotId: "tpu_gpu",
+        label: slotResults.tpu_gpu.label,
+        status: dbGpuRes.status,
+        bestUrl:
+          dbGpuRes.status === "found" ? dbGpuRes.candidates[0].url : null,
+        bestTitle:
+          dbGpuRes.status === "found" ? dbGpuRes.candidates[0].title : null,
+        confidence: dbGpuRes.candidates[0].confidence,
+        source: "dbgpu",
+        candidates: dbGpuRes.candidates,
+      };
+    }
+
+    // Populate The Retro Web motherboard slot
+    if (needRetroWeb && slotResults.retro_web && retroCandidates.length > 0) {
+      const isAmbiguous =
+        retroCandidates.length >= 2 &&
+        retroCandidates[0].confidence !== "high";
+      slotResults.retro_web = {
+        slotId: "retro_web",
+        label: slotResults.retro_web.label,
+        status: isAmbiguous ? "ambiguous" : "found",
+        bestUrl: isAmbiguous ? null : retroCandidates[0].url,
+        bestTitle: isAmbiguous ? null : retroCandidates[0].title,
+        confidence: retroCandidates[0].confidence,
+        source: "The Retro Web",
+        candidates: retroCandidates,
+      };
+    }
+
+    // Populate remaining slots from Wikipedia external links
+    if (wikiRes && wikiRes.canonicalLinks.length > 0) {
+      for (const link of wikiRes.canonicalLinks) {
+        if (slotResults[link.slotId]) {
+          setSlotFound(link.slotId, {
+            url: link.url,
+            title: link.label,
+            source: "Wikipedia",
+            confidence: "high",
+          });
+        }
+      }
+    }
+
+    // Optional Hybrid Search API enrichment for any still-unresolved slots (max 3 calls)
+    if (serperKey || braveKey) {
+      const unresolvedIds = requestedSlots
+        .filter((id) => slotResults[id]?.status === "not_found")
+        .slice(0, 3);
+
+      if (unresolvedIds.length > 0) {
+        const searchResults = await Promise.all(
+          unresolvedIds.map((id) =>
+            searchWebForSlot(
+              id,
+              slotResults[id].label,
+              rawQuery,
+              brand,
+              partType,
+              serperKey,
+              braveKey,
+            ),
+          ),
+        );
+        for (const sr of searchResults) {
+          if (sr.candidates.length > 0) {
+            slotResults[sr.slotId] = sr;
+          }
+        }
+      }
+    }
+
+    // Build legacy `results` array for CPU/GPU spec auto-fill
     const combined: HardwareLookupResult[] = [...rankedCatalog];
+    if (isChipLookup && !exactCatalogHit) {
+      const pmBest = pmMatch.best;
+      if (partType === "gpu" && dbGpuRes.best) {
+        const dbBest = dbGpuRes.best;
+        const tpuUrl = slotResults.tpu_gpu?.bestUrl ?? dbBest.spec_url;
+        const extraFromSlots: SpecLinkItem[] = Object.values(slotResults)
+          .filter((s) => s.status === "found" && s.bestUrl && s.bestUrl !== tpuUrl)
+          .map((s) => ({ label: s.label, url: s.bestUrl! }));
 
-    if (partType === "gpu" && dbGpuMatch) {
-      const wikiLinks = wikiRes?.canonicalLinks ?? [];
-      const extraLinks: SpecLinkItem[] = dedupeSpecLinks(dbGpuMatch.spec_url, [
-        ...wikiLinks,
-        ...(pmMatch
-          ? [
-              {
-                label: "PassMark G3D Mark",
-                url: pmMatch.url,
-              },
-            ]
-          : []),
-      ]);
-      combined.unshift({
-        ...dbGpuMatch,
-        passmark_score: pmMatch?.score ?? dbGpuMatch.passmark_score ?? null,
-        spec_links: extraLinks,
-      });
-    } else if (wikiRes) {
-      const isMobile = /\b(mobile|laptop|max-q|hq|mq|hs|hx|u-series)\b/i.test(
-        rawQuery,
-      );
-      const canonical = wikiRes.canonicalLinks;
-      const primaryUrl =
-        canonical[0]?.url ??
-        pmMatch?.url ??
-        buildOfficialSearchUrl(rawQuery, brand, partType);
-      const extraLinks = dedupeSpecLinks(primaryUrl, [
-        ...canonical.slice(1),
-        ...(pmMatch
-          ? [
-              {
-                label:
-                  partType === "cpu" ? "PassMark CPU Mark" : "PassMark G3D Mark",
-                url: pmMatch.url,
-              },
-            ]
-          : []),
-      ]);
+        combined.unshift({
+          ...dbBest,
+          spec_url: tpuUrl,
+          passmark_score: pmBest?.score ?? dbBest.passmark_score ?? null,
+          spec_links: dedupeSpecLinks(tpuUrl, extraFromSlots),
+        });
+      } else if (wikiRes) {
+        const isMobile = /\b(mobile|laptop|max-q|hq|mq|hs|hx|u-series)\b/i.test(
+          rawQuery,
+        );
+        const foundSlots = Object.values(slotResults).filter(
+          (s) => s.status === "found" && s.bestUrl,
+        );
+        const primaryUrl =
+          foundSlots[0]?.bestUrl ??
+          buildOfficialSearchUrl(rawQuery, brand || "Intel", partType);
+        const extraLinks = dedupeSpecLinks(
+          primaryUrl,
+          foundSlots.slice(1).map((s) => ({ label: s.label, url: s.bestUrl! })),
+        );
 
-      combined.unshift({
-        partType,
-        name: rawQuery,
-        brand,
-        is_mobile: isMobile,
-        passmark_score: pmMatch?.score ?? null,
-        spec_url: primaryUrl,
-        spec_links: extraLinks,
-        source: "live",
-        confidence:
-          canonical.length > 0 || Object.keys(wikiRes.specs).length >= 2
-            ? "high"
-            : "medium",
-        summary: wikiRes.summary || undefined,
-        ...wikiRes.specs,
-      });
-    } else if (pmMatch || combined.length === 0) {
-      const isMobile = /\b(mobile|laptop|max-q|hq|mq|hs|hx|m)\b/i.test(
-        rawQuery,
-      );
-      const primaryUrl =
-        pmMatch?.url ?? buildOfficialSearchUrl(rawQuery, brand, partType);
-      combined.unshift({
-        partType,
-        name: rawQuery,
-        brand,
-        is_mobile: isMobile,
-        passmark_score: pmMatch?.score ?? null,
-        spec_url: primaryUrl,
-        spec_links: [],
-        source: pmMatch ? "live" : "hybrid",
-        confidence: "medium",
-        summary: pmMatch
-          ? `Matched PassMark entry "${pmMatch.name}". Review specifications before saving.`
-          : `Prepared official ${brand} spec search link for "${rawQuery}". Fill or verify specs in the modal before saving.`,
-      });
+        combined.unshift({
+          partType,
+          name: rawQuery,
+          brand: brand || "Intel",
+          is_mobile: isMobile,
+          passmark_score: pmBest?.score ?? null,
+          spec_url: primaryUrl,
+          spec_links: extraLinks,
+          source: "live",
+          confidence:
+            foundSlots.length > 0 || Object.keys(wikiRes.specs).length >= 2
+              ? "high"
+              : "medium",
+          summary: wikiRes.summary || undefined,
+          ...wikiRes.specs,
+        });
+      } else if (pmBest || combined.length === 0) {
+        const isMobile = /\b(mobile|laptop|max-q|hq|mq|hs|hx|m)\b/i.test(
+          rawQuery,
+        );
+        const foundSlots = Object.values(slotResults).filter(
+          (s) => s.status === "found" && s.bestUrl,
+        );
+        const primaryUrl =
+          foundSlots[0]?.bestUrl ??
+          pmBest?.url ??
+          buildOfficialSearchUrl(rawQuery, brand || "Intel", partType);
+        const extraLinks = dedupeSpecLinks(
+          primaryUrl,
+          foundSlots.slice(1).map((s) => ({ label: s.label, url: s.bestUrl! })),
+        );
+        combined.unshift({
+          partType,
+          name: rawQuery,
+          brand: brand || "Intel",
+          is_mobile: isMobile,
+          passmark_score: pmBest?.score ?? null,
+          spec_url: primaryUrl,
+          spec_links: extraLinks,
+          source: pmBest || foundSlots.length > 0 ? "live" : "hybrid",
+          confidence: foundSlots.length > 0 ? "high" : "medium",
+          summary: pmBest
+            ? `Matched PassMark entry "${pmBest.name}". Review specifications before saving.`
+            : undefined,
+        });
+      }
+    }
+
+    const foundCount = Object.values(slotResults).filter(
+      (s) => s.status === "found",
+    ).length;
+    const ambiguousCount = Object.values(slotResults).filter(
+      (s) => s.status === "ambiguous",
+    ).length;
+    const totalCount = requestedSlots.length;
+
+    let note = "";
+    if (foundCount === totalCount && totalCount > 0) {
+      note = `Found all ${totalCount} direct links automatically.`;
+    } else if (foundCount > 0 || ambiguousCount > 0) {
+      note = `Found ${foundCount} of ${totalCount} links${
+        ambiguousCount > 0 ? ` (${ambiguousCount} need disambiguation)` : ""
+      }. Review or use Search on any remaining slots.`;
+    } else {
+      note =
+        searchProvider === "free"
+          ? "No direct URLs found in free sources — use the Search buttons below to grab and paste them."
+          : "No direct matches found — use the Search buttons below to grab and paste them.";
     }
 
     return new Response(
       JSON.stringify({
         results: combined.slice(0, 6),
-        source: wikiRes || dbGpuMatch || pmMatch ? "hybrid" : "catalog",
-        note:
-          dbGpuMatch || wikiRes || pmMatch
-            ? "Resolved live specifications and direct research links. Please review before saving."
-            : "Returned closest catalog matches and official spec search URL. Please review before saving.",
+        slotResults,
+        searchProvider,
+        source:
+          exactCatalogHit
+            ? "catalog"
+            : wikiRes || dbGpuRes.best || pmMatch.best || foundCount > 0
+              ? "hybrid"
+              : "catalog",
+        note,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown lookup error";
     return new Response(
-      JSON.stringify({ error: message, results: [] }),
+      JSON.stringify({
+        error: message,
+        results: [],
+        slotResults: {},
+        searchProvider: "free",
+      }),
       {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
